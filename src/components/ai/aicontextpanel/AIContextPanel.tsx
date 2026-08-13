@@ -53,8 +53,8 @@ export function AIContextPanel({
   ] = useState("")
 
   /*
-   * Load the scene-specific AI context whenever
-   * the active scene changes.
+   * Load scene-specific AI instructions
+   * whenever the active scene changes.
    */
   useEffect(() => {
     if (!activeScene) {
@@ -72,7 +72,8 @@ export function AIContextPanel({
   ])
 
   /*
-   * Load the saved response-length setting.
+   * Load the saved Continue AI response
+   * length.
    */
   useEffect(() => {
     setContinueWritingLength(
@@ -115,6 +116,12 @@ export function AIContextPanel({
     )
   }
 
+  /*
+   * This is the authoritative context builder.
+   *
+   * Do not recreate character, location,
+   * relationship, or scene context here.
+   */
   const context =
     buildSceneContext(
       activeScene,
@@ -122,14 +129,64 @@ export function AIContextPanel({
       project.locations,
     )
 
+  /*
+   * This is the exact formatter used to turn
+   * the structured context into AI-ready text.
+   */
   const formatted =
-    formatStoryContext(context)
+    formatStoryContext(
+      context,
+    )
 
   /*
-   * Radix/shadcn Slider can expose either a number
-   * or an array depending on the installed version.
+   * Story summary is project-level context and is
+   * displayed alongside the actual formatted scene
+   * context below.
+   */
+  const storySummary =
+    project.storySummary?.trim() ?? ""
+
+  /*
+   * The complete visible context preview.
    *
-   * Handle both so this remains type-safe.
+   * The scene/world context itself comes directly
+   * from formatStoryContext().
+   *
+   * Nothing is reconstructed or guessed here.
+   */
+  const displayedAIContext = [
+    storySummary
+      ? `## Story Summary\n${storySummary}`
+      : null,
+
+    formatted.text,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+
+  /*
+   * Estimate the displayed context using the same
+   * rough 4-characters-per-token approach used by
+   * buildSceneContext.ts.
+   *
+   * The formatted scene context already provides its
+   * own estimate, so only the additional story summary
+   * needs to be added here.
+   */
+  const storySummaryTokens =
+    storySummary
+      ? Math.ceil(
+          storySummary.length / 4,
+        )
+      : 0
+
+  const displayedContextTokens =
+    formatted.estimatedTokens +
+    storySummaryTokens
+
+  /*
+   * Radix/shadcn Slider versions can expose
+   * either a number or a readonly number[].
    */
   const handleResponseLengthChange = (
     value:
@@ -206,8 +263,18 @@ export function AIContextPanel({
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
 
-          {/* Continue AI Settings */}
+          {/* Continue AI */}
           <section>
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold">
+                Continue AI
+              </h2>
+
+              <p className="text-sm text-muted-foreground">
+                Control how much text the AI can generate when continuing this scene.
+              </p>
+            </div>
+
             <div className="rounded-xl border bg-card p-5">
               <div className="mb-5">
                 <div className="flex items-center justify-between gap-4">
@@ -224,8 +291,7 @@ export function AIContextPanel({
                 </div>
 
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Controls the maximum number of tokens the AI can
-                  generate when you use Continue AI. This affects the length of the AI text.
+                  Maximum number of tokens the AI can generate.
                 </p>
               </div>
 
@@ -251,14 +317,18 @@ export function AIContextPanel({
 
                 <span
                   className="absolute -translate-x-1/2"
-                  style={{ left: "23%" }}
+                  style={{
+                    left: "22.1%",
+                  }}
                 >
                   1,024
                 </span>
 
                 <span
                   className="absolute -translate-x-1/2"
-                  style={{ left: "48.4%" }}
+                  style={{
+                    left: "48.4%",
+                  }}
                 >
                   2,048
                 </span>
@@ -278,7 +348,7 @@ export function AIContextPanel({
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                Additional instructions that should only apply to this scene.
+                Additional instructions that only apply to this scene.
               </p>
             </div>
 
@@ -303,12 +373,12 @@ export function AIContextPanel({
               />
 
               <p className="mt-2 text-xs text-muted-foreground">
-                This context is saved automatically for this scene and will be included in AI requests.
+                This context is saved automatically for this scene.
               </p>
             </div>
           </section>
 
-          {/* Context summary */}
+          {/* Context Summary */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -316,7 +386,7 @@ export function AIContextPanel({
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                What will currently be provided to the AI.
+                What the automatic scene context contains.
               </p>
             </div>
 
@@ -349,7 +419,7 @@ export function AIContextPanel({
                 icon={MessageSquare}
                 label="Estimated Tokens"
                 value={
-                  formatted.estimatedTokens
+                  displayedContextTokens
                 }
               />
             </div>
@@ -386,7 +456,7 @@ export function AIContextPanel({
             </div>
           </section>
 
-          {/* Scene */}
+          {/* Current Scene */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -449,7 +519,7 @@ export function AIContextPanel({
             </div>
           </section>
 
-          {/* Formatted context */}
+          {/* Formatted AI Context */}
           <section className="pb-8">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
@@ -458,19 +528,19 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  This is the exact text currently produced by the context formatter.
+                  The actual context produced by the AI context formatter.
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Eye className="h-4 w-4" />
 
-                {formatted.estimatedTokens} tokens
+                {displayedContextTokens.toLocaleString()} tokens
               </div>
             </div>
 
-            <pre className="max-h-[600px] overflow-auto whitespace-pre-wrap rounded-xl border bg-muted/30 p-5 font-mono text-xs leading-relaxed">
-              {formatted.text}
+            <pre className="max-h-[700px] overflow-auto whitespace-pre-wrap rounded-xl border bg-muted/30 p-5 font-mono text-xs leading-relaxed">
+              {displayedAIContext}
             </pre>
           </section>
         </div>

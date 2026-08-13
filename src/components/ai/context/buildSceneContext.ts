@@ -63,11 +63,23 @@ export function buildSceneContext(
 /**
  * Converts structured story context into
  * text suitable for an AI prompt.
+ *
+ * Detection results are intentionally NOT
+ * included in the formatted prompt.
+ *
+ * detectedCharacters and detectedLocations
+ * are internal metadata used to determine
+ * what context should be included and are
+ * still available on StoryContext for the UI.
  */
 export function formatStoryContext(
   context: StoryContext,
 ): FormattedStoryContext {
   const sections: string[] = []
+
+  // --------------------------------------------------
+  // Current Scene
+  // --------------------------------------------------
 
   sections.push(
     `## Current Scene\n${context.scene.title}`,
@@ -130,29 +142,6 @@ export function formatStoryContext(
     )
   }
 
-  if (
-    context.detectedLocations.length >
-    0
-  ) {
-    const detectedSections =
-      context.detectedLocations.map(
-        (mention) =>
-          `- ${mention.matchedText} (${mention.source})`,
-      )
-
-    sections.push(
-      [
-        "## Detected Location References",
-
-        "",
-
-        detectedSections.join(
-          "\n",
-        ),
-      ].join("\n"),
-    )
-  }
-
   // --------------------------------------------------
   // Characters
   // --------------------------------------------------
@@ -178,36 +167,12 @@ export function formatStoryContext(
     )
   }
 
-  if (
-    context.detectedCharacters.length >
-    0
-  ) {
-    const detectedSections =
-      context.detectedCharacters.map(
-        (mention) =>
-          `- ${mention.matchedText} (${mention.source})`,
-      )
-
-    sections.push(
-      [
-        "## Detected Character References",
-
-        "",
-
-        detectedSections.join(
-          "\n",
-        ),
-      ].join("\n"),
-    )
-  }
-
   // --------------------------------------------------
   // Relationships
   // --------------------------------------------------
 
   if (
-    context.relationships.length >
-    0
+    context.relationships.length > 0
   ) {
     const relationshipSections =
       context.relationships.map(

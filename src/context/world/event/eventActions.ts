@@ -36,7 +36,7 @@ export function addEvent(
   setProject((current) => ({
     ...current,
     events: [
-      ...current.events,
+      ...(current.events ?? []),
       newEvent,
     ],
     updatedAt: now,
@@ -60,18 +60,19 @@ export function updateEvent(
   setProject((current) => ({
     ...current,
 
-    events: current.events.map(
-      (event) =>
-        event.id === eventId
-          ? {
-              ...event,
-              ...updates,
-              id: event.id,
-              createdAt:
-                event.createdAt,
-              updatedAt: now,
-            }
-          : event,
+    events: (
+      current.events ?? []
+    ).map((event) =>
+      event.id === eventId
+        ? {
+            ...event,
+            ...updates,
+            id: event.id,
+            createdAt:
+              event.createdAt,
+            updatedAt: now,
+          }
+        : event,
     ),
 
     updatedAt: now,
@@ -92,7 +93,9 @@ export function deleteEvent(
   setProject((current) => ({
     ...current,
 
-    events: current.events.filter(
+    events: (
+      current.events ?? []
+    ).filter(
       (event) =>
         event.id !== eventId,
     ),

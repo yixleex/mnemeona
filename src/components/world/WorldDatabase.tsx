@@ -304,7 +304,6 @@ export function WorldDatabase({
               </Button>
 
               <Button
-                variant="outline"
                 onClick={() =>
                   setActiveView(
                     "events",
