@@ -1,18 +1,21 @@
 import {
+  Eye,
+  Link2,
   MapPin,
   MessageSquare,
-  Users,
-  Link2,
-  Eye,
   Sparkles,
+  Users,
 } from "lucide-react"
+
+import {
+  useEffect,
+  useState,
+} from "react"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
-
-import { useEffect, useState } from "react"
 
 import { useProject } from "@/context/ProjectContext"
 
@@ -27,6 +30,12 @@ import {
   saveContinueWritingLength,
   saveSceneAIContext,
 } from "@/components/ai/aiservice/aiService"
+
+import {
+  estimateAIRequestTokens,
+  formatTokenCount,
+  type AITokenCount,
+} from "@/components/ai/aiservice/aiTokenCounter"
 
 interface AIContextPanelProps {
   onClose?: () => void
@@ -52,10 +61,18 @@ export function AIContextPanel({
     setSceneAIContext,
   ] = useState("")
 
-  /*
-   * Load scene-specific AI instructions
-   * whenever the active scene changes.
-   */
+  const [
+    tokenCount,
+    setTokenCount,
+  ] = useState<AITokenCount | null>(
+    null,
+  )
+
+  const [
+    tokenCountLoading,
+    setTokenCountLoading,
+  ] = useState(false)
+
   useEffect(() => {
     if (!activeScene) {
       setSceneAIContext("")
@@ -71,15 +88,74 @@ export function AIContextPanel({
     activeScene?.id,
   ])
 
-  /*
-   * Load the saved Continue AI response
-   * length.
-   */
   useEffect(() => {
     setContinueWritingLength(
       loadContinueWritingLength(),
     )
   }, [])
+
+  /*
+   * Re-tokenize whenever any part of the scene/context that can
+   * affect the request changes.
+   *
+   * The scene prose is included by aiTokenCounter.ts but is NOT
+   * rendered inside Formatted AI Context.
+   */
+  useEffect(() => {
+    if (!activeScene) {
+      setTokenCount(null)
+      return
+    }
+
+    const controller =
+      new AbortController()
+
+    let cancelled = false
+
+    const calculateTokens =
+      async () => {
+        setTokenCountLoading(
+          true,
+        )
+
+        try {
+          const result =
+            await estimateAIRequestTokens(
+              project,
+              activeScene,
+              continueWritingLength,
+              [],
+              controller.signal,
+            )
+
+          if (!cancelled) {
+            setTokenCount(result)
+          }
+        } catch {
+          if (!cancelled) {
+            setTokenCount(null)
+          }
+        } finally {
+          if (!cancelled) {
+            setTokenCountLoading(
+              false,
+            )
+          }
+        }
+      }
+
+    void calculateTokens()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [
+    project,
+    activeScene,
+    continueWritingLength,
+    sceneAIContext,
+  ])
 
   if (!activeScene) {
     return (
@@ -116,12 +192,6 @@ export function AIContextPanel({
     )
   }
 
-  /*
-   * This is the authoritative context builder.
-   *
-   * Do not recreate character, location,
-   * relationship, or scene context here.
-   */
   const context =
     buildSceneContext(
       activeScene,
@@ -129,65 +199,9 @@ export function AIContextPanel({
       project.locations,
     )
 
-  /*
-   * This is the exact formatter used to turn
-   * the structured context into AI-ready text.
-   */
   const formatted =
-    formatStoryContext(
-      context,
-    )
+    formatStoryContext(context)
 
-  /*
-   * Story summary is project-level context and is
-   * displayed alongside the actual formatted scene
-   * context below.
-   */
-  const storySummary =
-    project.storySummary?.trim() ?? ""
-
-  /*
-   * The complete visible context preview.
-   *
-   * The scene/world context itself comes directly
-   * from formatStoryContext().
-   *
-   * Nothing is reconstructed or guessed here.
-   */
-  const displayedAIContext = [
-    storySummary
-      ? `## Story Summary\n${storySummary}`
-      : null,
-
-    formatted.text,
-  ]
-    .filter(Boolean)
-    .join("\n\n")
-
-  /*
-   * Estimate the displayed context using the same
-   * rough 4-characters-per-token approach used by
-   * buildSceneContext.ts.
-   *
-   * The formatted scene context already provides its
-   * own estimate, so only the additional story summary
-   * needs to be added here.
-   */
-  const storySummaryTokens =
-    storySummary
-      ? Math.ceil(
-          storySummary.length / 4,
-        )
-      : 0
-
-  const displayedContextTokens =
-    formatted.estimatedTokens +
-    storySummaryTokens
-
-  /*
-   * Radix/shadcn Slider versions can expose
-   * either a number or a readonly number[].
-   */
   const handleResponseLengthChange = (
     value:
       | number
@@ -226,6 +240,9 @@ export function AIContextPanel({
     )
   }
 
+  const percentage =
+    tokenCount?.percentage ?? 0
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
@@ -259,22 +276,10 @@ export function AIContextPanel({
         </div>
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
-
-          {/* Continue AI */}
+          {/* Response length */}
           <section>
-            <div className="mb-4">
-              <h2 className="text-sm font-semibold">
-                Continue AI
-              </h2>
-
-              <p className="text-sm text-muted-foreground">
-                Control how much text the AI can generate when continuing this scene.
-              </p>
-            </div>
-
             <div className="rounded-xl border bg-card p-5">
               <div className="mb-5">
                 <div className="flex items-center justify-between gap-4">
@@ -291,7 +296,8 @@ export function AIContextPanel({
                 </div>
 
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Maximum number of tokens the AI can generate.
+                  Maximum number of tokens the AI can generate when
+                  Continue AI is used.
                 </p>
               </div>
 
@@ -301,7 +307,9 @@ export function AIContextPanel({
                   min={128}
                   max={4096}
                   step={128}
-                  value={continueWritingLength}
+                  value={[
+                    continueWritingLength,
+                  ]}
                   onValueChange={
                     handleResponseLengthChange
                   }
@@ -318,7 +326,7 @@ export function AIContextPanel({
                 <span
                   className="absolute -translate-x-1/2"
                   style={{
-                    left: "22.1%",
+                    left: "23%",
                   }}
                 >
                   1,024
@@ -340,7 +348,7 @@ export function AIContextPanel({
             </div>
           </section>
 
-          {/* Scene-specific context */}
+          {/* Additional scene context */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -373,12 +381,146 @@ export function AIContextPanel({
               />
 
               <p className="mt-2 text-xs text-muted-foreground">
-                This context is saved automatically for this scene.
+                This context is saved automatically for this scene and
+                included in AI requests.
               </p>
             </div>
           </section>
 
-          {/* Context Summary */}
+          {/* Prompt context */}
+          <section>
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold">
+                Prompt Context
+              </h2>
+
+              <p className="text-sm text-muted-foreground">
+                Estimated usage of the selected model's context window,
+                including the current scene and selected response length.
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-card p-5">
+              {tokenCount?.contextLength ? (
+                <>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-lg font-semibold">
+                        {formatTokenCount(
+                          tokenCount.totalTokens,
+                        )}{" "}
+                        /{" "}
+                        {formatTokenCount(
+                          tokenCount.contextLength,
+                        )}{" "}
+                        tokens
+                      </p>
+
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {tokenCount.source ===
+                        "tokenizer"
+                          ? "Counted using the selected model's tokenizer."
+                          : "Using a fallback token estimate because the model tokenizer is unavailable."}
+                      </p>
+                    </div>
+
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
+                      {tokenCount.percentage !==
+                      null
+                        ? `${tokenCount.percentage.toFixed(1)}%`
+                        : "—"}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all duration-300"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          percentage,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                    <div className="rounded-lg bg-muted/40 p-3">
+                      <p className="text-muted-foreground">
+                        Prompt
+                      </p>
+
+                      <p className="mt-1 font-medium">
+                        {formatTokenCount(
+                          tokenCount.promptTokens,
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg bg-muted/40 p-3">
+                      <p className="text-muted-foreground">
+                        Response budget
+                      </p>
+
+                      <p className="mt-1 font-medium">
+                        {formatTokenCount(
+                          tokenCount.responseTokens,
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {tokenCount.totalTokens >
+                    tokenCount.contextLength && (
+                    <p className="mt-3 text-xs font-medium text-destructive">
+                      The prompt and selected response length exceed
+                      this model's context window.
+                    </p>
+                  )}
+
+                  {tokenCount.totalTokens <=
+                    tokenCount.contextLength &&
+                    tokenCount.percentage !==
+                      null &&
+                    tokenCount.percentage >=
+                      80 && (
+                    <p className="mt-3 text-xs font-medium text-amber-600">
+                      This request is using most of the model's context
+                      window. Consider reducing the response length or
+                      scene/context size.
+                    </p>
+                  )}
+
+                  {tokenCount.tokenizerError && (
+                    <p className="mt-3 break-words text-xs text-muted-foreground">
+                      Tokenizer status:{" "}
+                      {tokenCount.tokenizerError}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="py-3">
+                  <p className="text-sm font-medium">
+                    Context size unavailable
+                  </p>
+
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {tokenCountLoading
+                      ? "Reading the model tokenizer and context window..."
+                      : "Ollama did not provide enough information to calculate the context percentage."}
+                  </p>
+
+                  {tokenCount?.tokenizerError && (
+                    <p className="mt-3 break-words text-xs text-destructive">
+                      {tokenCount.tokenizerError}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Context summary */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -386,7 +528,7 @@ export function AIContextPanel({
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                What the automatic scene context contains.
+                What will currently be provided to the AI.
               </p>
             </div>
 
@@ -417,15 +559,16 @@ export function AIContextPanel({
 
               <ContextStat
                 icon={MessageSquare}
-                label="Estimated Tokens"
+                label="Prompt Tokens"
                 value={
-                  displayedContextTokens
+                  tokenCount?.promptTokens ??
+                  0
                 }
               />
             </div>
           </section>
 
-          {/* Detection */}
+          {/* Automatic detection */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -456,7 +599,7 @@ export function AIContextPanel({
             </div>
           </section>
 
-          {/* Current Scene */}
+          {/* Current scene */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -464,7 +607,7 @@ export function AIContextPanel({
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                The scene being used as the current AI context.
+                The scene currently being used as AI context.
               </p>
             </div>
 
@@ -519,7 +662,7 @@ export function AIContextPanel({
             </div>
           </section>
 
-          {/* Formatted AI Context */}
+          {/* Formatted AI context */}
           <section className="pb-8">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
@@ -528,19 +671,32 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  The actual context produced by the AI context formatter.
+                  The formatted context generated for the AI. The
+                  current scene prose is sent separately and is not
+                  duplicated here.
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Eye className="h-4 w-4" />
 
-                {displayedContextTokens.toLocaleString()} tokens
+                {tokenCount ? (
+                  <span>
+                    {formatTokenCount(
+                      tokenCount.promptTokens,
+                    )}{" "}
+                    prompt tokens
+                  </span>
+                ) : (
+                  <span>
+                    Token count unavailable
+                  </span>
+                )}
               </div>
             </div>
 
-            <pre className="max-h-[700px] overflow-auto whitespace-pre-wrap rounded-xl border bg-muted/30 p-5 font-mono text-xs leading-relaxed">
-              {displayedAIContext}
+            <pre className="max-h-[600px] overflow-auto whitespace-pre-wrap rounded-xl border bg-muted/30 p-5 font-mono text-xs leading-relaxed">
+              {formatted.text}
             </pre>
           </section>
         </div>
@@ -548,10 +704,6 @@ export function AIContextPanel({
     </div>
   )
 }
-
-// --------------------------------------------------
-// Components
-// --------------------------------------------------
 
 function ContextStat({
   icon: Icon,

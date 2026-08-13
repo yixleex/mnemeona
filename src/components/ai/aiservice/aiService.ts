@@ -56,13 +56,6 @@ export interface AIMessage {
   content: string
 }
 
-/*
- * We don't import Scene because your project types
- * don't export it directly.
- *
- * This extracts the actual scene type from the
- * existing MnemeonaProject structure.
- */
 type ProjectScene =
   MnemeonaProject["manuscript"]["acts"][number]["chapters"][number]["scenes"][number]
 
@@ -72,19 +65,7 @@ export interface AIChatOptions {
   activeScene: ProjectScene
   signal?: AbortSignal
   onToken?: (token: string) => void
-
-  /*
-   * Optional custom system prompt.
-   *
-   * If provided, this completely replaces the
-   * automatically generated system prompt.
-   */
   systemPrompt?: string
-
-  /*
-   * Maximum number of tokens the model should
-   * generate for this response.
-   */
   continueWritingTokens?: number
 }
 
@@ -94,6 +75,16 @@ interface AICompletionOptions {
   activeScene: ProjectScene
   signal?: AbortSignal
   systemPrompt?: string
+}
+
+export interface AIModelContextInfo {
+  model: string
+  contextLength: number | null
+  source:
+    | "running"
+    | "configured"
+    | "model"
+    | "unknown"
 }
 
 // --------------------------------------------------
@@ -205,7 +196,9 @@ export function saveSceneAIContext(
 export function loadAIConfig(): AIConfig {
   try {
     const stored =
-      localStorage.getItem(STORAGE_KEY)
+      localStorage.getItem(
+        STORAGE_KEY,
+      )
 
     if (!stored) {
       return DEFAULT_CONFIG
@@ -371,7 +364,6 @@ function buildPreviousScenesContext(
           `ACT: ${act.title}
 CHAPTER: ${chapter.title}
 SCENE: ${scene.title}
-
 ${text}`,
         )
       }
@@ -386,7 +378,9 @@ ${text}`,
     }
   }
 
-  return scenes.join("\n\n")
+  return scenes.join(
+    "\n\n",
+  )
 }
 
 // --------------------------------------------------
@@ -401,7 +395,9 @@ export async function generateStorySummary(
   const config =
     loadAIConfig()
 
-  validateAIConfig(config)
+  validateAIConfig(
+    config,
+  )
 
   const previousScenes =
     buildPreviousScenesContext(
@@ -409,12 +405,10 @@ export async function generateStorySummary(
       activeScene,
     )
 
-  /*
-   * There is nothing before the current scene.
-   */
   if (!previousScenes.trim()) {
     return (
-      project.storySummary?.trim() ?? ""
+      project.storySummary?.trim() ??
+      ""
     )
   }
 
@@ -477,7 +471,7 @@ Return ONLY the updated story summary.`
 // System Prompt
 // --------------------------------------------------
 
-function buildSystemPrompt(
+export function buildSystemPrompt(
   project: MnemeonaProject,
   activeScene: ProjectScene,
 ): string {
@@ -515,20 +509,514 @@ ${activeScene.synopsis ? `Synopsis: ${activeScene.synopsis}` : ""}
 `
 }
 
+/**
+ * Returns the exact system prompt generated for
+ * normal AI requests.
+ */
+export function buildAIRequestPrompt(
+  project: MnemeonaProject,
+  activeScene: ProjectScene,
+): string {
+  return buildSystemPrompt(
+    project,
+    activeScene,
+  )
+}
+
 // --------------------------------------------------
-// Shared AI Configuration Validation
+// Token Estimation
+// --------------------------------------------------
+
+/**
+ * Rough browser-side token estimate.
+ *
+ * Ollama does the real tokenization server-side,
+ * but the browser does not have the model tokenizer.
+ */
+export function estimateTokenCount(
+  text: string,
+): number {
+  if (!text.trim()) {
+    return 0
+  }
+
+  return Math.ceil(
+    text.length / 4,
+  )
+}
+
+// --------------------------------------------------
+// Ollama Model Context Information
+// --------------------------------------------------
+
+interface OllamaShowResponse {
+  parameters?: string
+
+  model_info?: Record<
+    string,
+    unknown
+  >
+
+  details?: Record<
+    string,
+    unknown
+  >
+
+  error?: string
+}
+
+interface OllamaPsModel {
+  name?: string
+  model?: string
+  context_length?: number
+}
+
+interface OllamaPsResponse {
+  models?: OllamaPsModel[]
+}
+
+/**
+ * Find a native model context length inside
+ * Ollama's model_info.
+ *
+ * Ollama returns keys such as:
+ *
+ *   qwen3.context_length
+ *   llama.context_length
+ *   gemma3.context_length
+ *
+ * The previous implementation only accepted the
+ * exact key "context_length", which meant those
+ * architecture-prefixed keys were missed.
+ */
+function findModelContextLength(
+  modelInfo:
+    | Record<string, unknown>
+    | undefined,
+): number | null {
+  if (!modelInfo) {
+    return null
+  }
+
+  /*
+   * First check the exact key.
+   */
+  const exact =
+    modelInfo.context_length
+
+  if (
+    typeof exact === "number" &&
+    Number.isFinite(exact) &&
+    exact > 0
+  ) {
+    return Math.floor(exact)
+  }
+
+  /*
+   * Then check architecture-prefixed keys.
+   *
+   * Examples:
+   * qwen3.context_length
+   * llama.context_length
+   * gemma3.context_length
+   */
+  for (const [
+    key,
+    value,
+  ] of Object.entries(
+    modelInfo,
+  )) {
+    if (
+      key
+        .toLowerCase()
+        .endsWith(
+          ".context_length",
+        )
+    ) {
+      if (
+        typeof value ===
+          "number" &&
+        Number.isFinite(
+          value,
+        ) &&
+        value > 0
+      ) {
+        return Math.floor(
+          value,
+        )
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Read a num_ctx setting from Ollama's
+ * serialized model parameters.
+ *
+ * Example:
+ *
+ * temperature 0.7
+ * num_ctx 8192
+ */
+function findConfiguredContextLength(
+  parameters:
+    | string
+    | undefined,
+): number | null {
+  if (
+    !parameters
+  ) {
+    return null
+  }
+
+  const match =
+    parameters.match(
+      /(?:^|\s)num_ctx\s+(\d+)/i,
+    )
+
+  if (!match) {
+    return null
+  }
+
+  const value =
+    Number(match[1])
+
+  if (
+    !Number.isFinite(value) ||
+    value <= 0
+  ) {
+    return null
+  }
+
+  return Math.floor(value)
+}
+
+/**
+ * Find the currently loaded model in /api/ps.
+ *
+ * /api/ps reports the context_length actually
+ * allocated to the running model. This is more useful
+ * than native model metadata when Ollama is currently
+ * using a smaller context window.
+ */
+async function getRunningModelContextLength(
+  endpoint: string,
+  model: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<number | null> {
+  try {
+    const response =
+      await fetch(
+        `${endpoint}/api/ps`,
+        {
+          method: "GET",
+
+          headers: {
+            ...(apiKey
+              ? {
+                  Authorization:
+                    `Bearer ${apiKey}`,
+                }
+              : {}),
+          },
+
+          signal,
+        },
+      )
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data =
+      (await response.json()) as OllamaPsResponse
+
+    const models =
+      data.models ?? []
+
+    const normalizedModel =
+      model.toLowerCase()
+
+    /*
+     * Prefer an exact model-name match.
+     */
+    const exactMatch =
+      models.find(
+        (entry) =>
+          (
+            entry.name ??
+            entry.model ??
+            ""
+          ).toLowerCase() ===
+          normalizedModel,
+      )
+
+    if (
+      exactMatch &&
+      typeof exactMatch.context_length ===
+        "number" &&
+      Number.isFinite(
+        exactMatch.context_length,
+      ) &&
+      exactMatch.context_length > 0
+    ) {
+      return Math.floor(
+        exactMatch.context_length,
+      )
+    }
+
+    /*
+     * If Ollama has normalized the model name,
+     * also allow a starts-with match.
+     */
+    const partialMatch =
+      models.find(
+        (entry) => {
+          const name =
+            (
+              entry.name ??
+              entry.model ??
+              ""
+            ).toLowerCase()
+
+          return (
+            name ===
+              normalizedModel ||
+            name.startsWith(
+              `${normalizedModel}:`,
+            )
+          )
+        },
+      )
+
+    if (
+      partialMatch &&
+      typeof partialMatch.context_length ===
+        "number" &&
+      Number.isFinite(
+        partialMatch.context_length,
+      ) &&
+      partialMatch.context_length > 0
+    ) {
+      return Math.floor(
+        partialMatch.context_length,
+      )
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Gets the model's usable context window.
+ *
+ * Priority:
+ *
+ * 1. Currently running model's /api/ps context_length
+ * 2. Explicit num_ctx configured on the model
+ * 3. Native *.context_length model metadata
+ *
+ * This is intentionally model-aware and does not
+ * hard-code Qwen3 or any other model.
+ */
+export async function getAIModelContextInfo(
+  signal?: AbortSignal,
+): Promise<AIModelContextInfo> {
+  const config =
+    loadAIConfig()
+
+  const model =
+    config.model.trim()
+
+  if (
+    !config.endpoint.trim() ||
+    !model
+  ) {
+    return {
+      model,
+      contextLength:
+        null,
+      source:
+        "unknown",
+    }
+  }
+
+  const endpoint =
+    config.endpoint.replace(
+      /\/+$/,
+      "",
+    )
+
+  /*
+   * First ask Ollama what is actually loaded.
+   */
+  const runningContextLength =
+    await getRunningModelContextLength(
+      endpoint,
+      model,
+      config.apiKey,
+      signal,
+    )
+
+  if (
+    runningContextLength !==
+    null
+  ) {
+    return {
+      model,
+      contextLength:
+        runningContextLength,
+      source:
+        "running",
+    }
+  }
+
+  /*
+   * Then request the model metadata.
+   */
+  try {
+    const response =
+      await fetch(
+        `${endpoint}/api/show`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            ...(config.apiKey
+              ? {
+                  Authorization:
+                    `Bearer ${config.apiKey}`,
+                }
+              : {}),
+          },
+
+          body: JSON.stringify({
+            model,
+            verbose: true,
+          }),
+
+          signal,
+        },
+      )
+
+    if (!response.ok) {
+      return {
+        model,
+        contextLength:
+          null,
+        source:
+          "unknown",
+      }
+    }
+
+    const data =
+      (await response.json()) as OllamaShowResponse
+
+    if (data.error) {
+      return {
+        model,
+        contextLength:
+          null,
+        source:
+          "unknown",
+      }
+    }
+
+    /*
+     * A custom Ollama model can explicitly define
+     * num_ctx. If it does, that setting represents
+     * the configured context window.
+     */
+    const configuredContextLength =
+      findConfiguredContextLength(
+        data.parameters,
+      )
+
+    if (
+      configuredContextLength !==
+      null
+    ) {
+      return {
+        model,
+        contextLength:
+          configuredContextLength,
+        source:
+          "configured",
+      }
+    }
+
+    /*
+     * Finally use the model's native context window.
+     *
+     * This correctly handles:
+     *
+     * qwen3.context_length
+     * llama.context_length
+     * gemma3.context_length
+     * etc.
+     */
+    const nativeContextLength =
+      findModelContextLength(
+        data.model_info,
+      )
+
+    if (
+      nativeContextLength !==
+      null
+    ) {
+      return {
+        model,
+        contextLength:
+          nativeContextLength,
+        source:
+          "model",
+      }
+    }
+
+    return {
+      model,
+      contextLength:
+        null,
+      source:
+        "unknown",
+    }
+  } catch {
+    return {
+      model,
+      contextLength:
+        null,
+      source:
+        "unknown",
+    }
+  }
+}
+
+// --------------------------------------------------
+// AI Configuration Validation
 // --------------------------------------------------
 
 function validateAIConfig(
   config: AIConfig,
 ): void {
-  if (!config.endpoint.trim()) {
+  if (
+    !config.endpoint.trim()
+  ) {
     throw new Error(
       "No AI server URL is configured. Open AI Settings and enter your Ollama server URL.",
     )
   }
 
-  if (!config.model.trim()) {
+  if (
+    !config.model.trim()
+  ) {
     throw new Error(
       "No AI model is configured. Open AI Settings and enter the model name.",
     )
@@ -549,7 +1037,9 @@ async function requestAICompletion({
   const config =
     loadAIConfig()
 
-  validateAIConfig(config)
+  validateAIConfig(
+    config,
+  )
 
   const endpoint =
     config.endpoint.replace(
@@ -584,7 +1074,8 @@ async function requestAICompletion({
         },
 
         body: JSON.stringify({
-          model: config.model,
+          model:
+            config.model,
 
           messages: [
             {
@@ -659,7 +1150,9 @@ export async function streamAIChat({
   const config =
     loadAIConfig()
 
-  validateAIConfig(config)
+  validateAIConfig(
+    config,
+  )
 
   const endpoint =
     config.endpoint.replace(
@@ -681,12 +1174,6 @@ export async function streamAIChat({
       finalSystemPrompt,
   }
 
-  /*
-   * The UI value is already expressed in tokens,
-   * so pass it directly to Ollama.
-   *
-   * No word/token conversion is performed.
-   */
   const generationOptions =
     continueWritingTokens &&
     continueWritingTokens > 0
@@ -717,7 +1204,8 @@ export async function streamAIChat({
         },
 
         body: JSON.stringify({
-          model: config.model,
+          model:
+            config.model,
 
           messages: [
             systemMessage,
@@ -802,12 +1290,10 @@ export async function streamAIChat({
         onToken?.(token)
       }
 
-      return data?.done === true
+      return (
+        data?.done === true
+      )
     } catch (error) {
-      /*
-       * Ignore incomplete JSON fragments.
-       * Actual server errors are still thrown.
-       */
       if (
         error instanceof Error &&
         error.message !==
@@ -831,12 +1317,13 @@ export async function streamAIChat({
         break
       }
 
-      buffer += decoder.decode(
-        value,
-        {
-          stream: true,
-        },
-      )
+      buffer +=
+        decoder.decode(
+          value,
+          {
+            stream: true,
+          },
+        )
 
       const lines =
         buffer.split("\n")
@@ -846,7 +1333,9 @@ export async function streamAIChat({
 
       for (const line of lines) {
         const finished =
-          processLine(line)
+          processLine(
+            line,
+          )
 
         if (finished) {
           return fullResponse
@@ -854,15 +1343,9 @@ export async function streamAIChat({
       }
     }
 
-    /*
-     * Flush any remaining decoder data.
-     */
-    buffer += decoder.decode()
+    buffer +=
+      decoder.decode()
 
-    /*
-     * Process the final buffered JSON object if
-     * Ollama did not end it with a newline.
-     */
     if (buffer.trim()) {
       processLine(buffer)
     }
@@ -881,7 +1364,9 @@ export async function testAIConnection(): Promise<void> {
   const config =
     loadAIConfig()
 
-  if (!config.endpoint.trim()) {
+  if (
+    !config.endpoint.trim()
+  ) {
     throw new Error(
       "No AI server URL is configured.",
     )
