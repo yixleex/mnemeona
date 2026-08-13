@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import {
   Search,
@@ -23,6 +23,14 @@ import { AISettingsDialog } from "./components/ai/aisettingsdialog/AISettingsDia
 
 import { useProject } from "./context/ProjectContext"
 
+import {
+  loadContinueWritingLength,
+} from "./components/ai/aiservice/aiService"
+
+import {
+  useAITokenCount,
+} from "./components/ai/aiservice/useAITokenCount"
+
 type Workspace =
   | "manuscript"
   | "characters"
@@ -34,23 +42,104 @@ type CharacterView =
 
 export default function App() {
   const {
+    project,
     activeScene,
     projectWordCount,
     activeSceneWordCount,
     summaryGenerating,
   } = useProject()
 
-  const [workspace, setWorkspace] =
-    useState<Workspace>("manuscript")
+  const [
+    workspace,
+    setWorkspace,
+  ] = useState<Workspace>(
+    "manuscript",
+  )
 
-  const [characterView, setCharacterView] =
-    useState<CharacterView>("database")
+  const [
+    characterView,
+    setCharacterView,
+  ] = useState<CharacterView>(
+    "database",
+  )
 
-  const [showAIContext, setShowAIContext] =
-    useState(false)
+  const [
+    showAIContext,
+    setShowAIContext,
+  ] = useState(false)
 
-  const [showAISettings, setShowAISettings] =
-    useState(false)
+  const [
+    showAISettings,
+    setShowAISettings,
+  ] = useState(false)
+
+  /*
+   * Keep the response-token setting in App as well as
+   * AIContextPanel so the token calculation can continue
+   * even when the panel is closed.
+   */
+  const [
+    continueWritingLength,
+    setContinueWritingLength,
+  ] = useState(
+    loadContinueWritingLength(),
+  )
+
+  /*
+   * The token calculation is deliberately mounted here,
+   * rather than inside AIContextPanel.
+   *
+   * Therefore:
+   *
+   *   Open panel
+   *       ↓
+   *   token calculation starts
+   *       ↓
+   *   close panel
+   *       ↓
+   *   calculation CONTINUES
+   *
+   * App remains mounted for the whole application lifetime.
+   */
+  const {
+    isCalculating:
+      isTokenCountCalculating,
+    isApproximate:
+      isTokenCountApproximate,
+  } = useAITokenCount({
+    project,
+    activeScene,
+    responseTokens:
+      continueWritingLength,
+  })
+
+  /*
+   * If the response length is changed from AIContextPanel,
+   * keep App's copy synchronized.
+   *
+   * The storage event does not fire in the same tab, so the
+   * custom event lets the two components communicate locally.
+   */
+  useEffect(() => {
+    const handleLengthChange =
+      () => {
+        setContinueWritingLength(
+          loadContinueWritingLength(),
+        )
+      }
+
+    window.addEventListener(
+      "mnemeona:continue-writing-length-changed",
+      handleLengthChange,
+    )
+
+    return () => {
+      window.removeEventListener(
+        "mnemeona:continue-writing-length-changed",
+        handleLengthChange,
+      )
+    }
+  }, [])
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -60,15 +149,19 @@ export default function App() {
 
       <aside className="flex w-64 shrink-0 flex-col border-r">
         {/* Header */}
+
         <header className="flex h-14 items-center border-b px-3">
           <ProjectSwitcher />
 
           {/* Settings */}
+
           <Button
             variant="ghost"
             size="icon"
             className="ml-auto size-8"
-            onClick={() => setShowAISettings(true)}
+            onClick={() =>
+              setShowAISettings(true)
+            }
             aria-label="AI Settings"
             title="AI Settings"
           >
@@ -77,6 +170,7 @@ export default function App() {
         </header>
 
         {/* Search */}
+
         <div className="px-3 pb-2 pt-3">
           <Button
             variant="ghost"
@@ -93,76 +187,102 @@ export default function App() {
         </div>
 
         {/* Navigation */}
+
         <nav className="flex-1 overflow-y-auto px-3 py-2">
           <ManuscriptTree
-            active={workspace === "manuscript"}
+            active={
+              workspace ===
+              "manuscript"
+            }
             onSceneSelect={() =>
-              setWorkspace("manuscript")
+              setWorkspace(
+                "manuscript",
+              )
             }
           />
 
           {/* Story */}
+
           <div className="mb-2 mt-8 px-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Story
           </div>
 
           <div className="space-y-1">
             {/* Characters */}
+
             <Button
               variant={
-                workspace === "characters"
+                workspace ===
+                "characters"
                   ? "secondary"
                   : "ghost"
               }
               className={`w-full justify-start gap-2 ${
-                workspace === "characters"
+                workspace ===
+                "characters"
                   ? ""
                   : "text-muted-foreground"
               }`}
               onClick={() => {
-                setWorkspace("characters")
-                setCharacterView("database")
+                setWorkspace(
+                  "characters",
+                )
+
+                setCharacterView(
+                  "database",
+                )
               }}
             >
               <Users className="size-4" />
+
               Characters
             </Button>
 
             {/* World */}
+
             <Button
               variant={
-                workspace === "world"
+                workspace ===
+                "world"
                   ? "secondary"
                   : "ghost"
               }
               className={`w-full justify-start gap-2 ${
-                workspace === "world"
+                workspace ===
+                "world"
                   ? ""
                   : "text-muted-foreground"
               }`}
               onClick={() => {
-                setWorkspace("world")
+                setWorkspace(
+                  "world",
+                )
               }}
             >
               <Globe2 className="size-4" />
+
               World
             </Button>
 
             {/* Notes */}
+
             <Button
               variant="ghost"
               className="w-full justify-start gap-2 text-muted-foreground"
             >
               <StickyNote className="size-4" />
+
               Notes
             </Button>
           </div>
         </nav>
 
         {/* Word Count */}
+
         <div className="border-t px-4 py-3">
           <div className="text-xs text-muted-foreground">
-            {projectWordCount.toLocaleString()} words
+            {projectWordCount.toLocaleString()}{" "}
+            words
           </div>
         </div>
       </aside>
@@ -172,29 +292,39 @@ export default function App() {
       {/* -------------------------------------------------- */}
 
       <main className="flex min-w-0 flex-1 flex-col">
-        {workspace === "world" ? (
+        {workspace ===
+        "world" ? (
           <WorldDatabase
             onClose={() =>
-              setWorkspace("manuscript")
+              setWorkspace(
+                "manuscript",
+              )
             }
           />
-        ) : workspace === "characters" ? (
-          characterView === "database" ? (
+        ) : workspace ===
+          "characters" ? (
+          characterView ===
+          "database" ? (
             <CharacterDatabase
               onOpenRelationships={() =>
-                setCharacterView("relationships")
+                setCharacterView(
+                  "relationships",
+                )
               }
             />
           ) : (
             <CharacterRelationships
               onBack={() =>
-                setCharacterView("database")
+                setCharacterView(
+                  "database",
+                )
               }
             />
           )
         ) : (
           <>
             {/* Editor Header */}
+
             <header className="flex h-14 shrink-0 items-center border-b px-6">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">
@@ -214,21 +344,76 @@ export default function App() {
                   Saved
                 </span>
 
+                {/* -------------------------------------------------- */}
                 {/* AI Context */}
+                {/* -------------------------------------------------- */}
+
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="gap-2"
+                  className={`relative gap-2 overflow-hidden transition-all duration-300 ${
+                    isTokenCountCalculating
+                      ? "bg-primary/10 text-primary"
+                      : ""
+                  }`}
                   onClick={() =>
-                    setShowAIContext(true)
+                    setShowAIContext(
+                      true,
+                    )
                   }
-                  disabled={summaryGenerating}
+                  disabled={
+                    summaryGenerating
+                  }
+                  aria-label={
+                    isTokenCountCalculating
+                      ? "AI Context is calculating token usage"
+                      : "Open AI Context"
+                  }
+                  title={
+                    isTokenCountCalculating
+                      ? "Calculating AI context tokens…"
+                      : "AI Context"
+                  }
                 >
-                  <Sparkles className="size-4" />
-                  AI Context
+                  {/* Animated background sweep */}
+
+                  {isTokenCountCalculating && (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 -translate-x-full animate-[aiContextSweep_1.8s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-primary/10 to-transparent"
+                    />
+                  )}
+
+                  <span className="relative flex items-center gap-2">
+                    <Sparkles
+                      className={`size-4 transition-all duration-300 ${
+                        isTokenCountCalculating
+                          ? "animate-[aiContextSparkle_1.4s_ease-in-out_infinite] text-primary"
+                          : ""
+                      }`}
+                    />
+
+                    AI Context
+
+                    {isTokenCountCalculating && (
+                      <span
+                        aria-hidden="true"
+                        className="flex items-center gap-0.5"
+                      >
+                        <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
+
+                        <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
+
+                        <span className="size-1 animate-bounce rounded-full bg-primary" />
+                      </span>
+                    )}
+                  </span>
                 </Button>
 
+                {/* -------------------------------------------------- */}
                 {/* AI Continue Writing */}
+                {/* -------------------------------------------------- */}
+
                 <Button
                   variant="ghost"
                   size="icon"
@@ -251,11 +436,13 @@ export default function App() {
             </header>
 
             {/* Editor */}
+
             <div className="min-h-0 flex-1">
               <NovelEditor />
             </div>
 
             {/* Editor Footer */}
+
             <footer className="flex h-9 shrink-0 items-center border-t px-6 text-xs text-muted-foreground">
               <span>
                 {activeScene?.title ??
@@ -300,24 +487,50 @@ export default function App() {
             aria-label="Close AI Context"
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() =>
-              setShowAIContext(false)
+              setShowAIContext(
+                false,
+              )
             }
           />
 
           <div className="relative z-10 flex h-[85vh] w-[min(1100px,90vw)] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
             <header className="flex h-14 shrink-0 items-center justify-between border-b px-5">
               <div className="flex items-center gap-2">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
-                  <Sparkles className="size-4 text-primary" />
+                <div
+                  className={`flex size-8 items-center justify-center rounded-lg transition-all duration-300 ${
+                    isTokenCountCalculating
+                      ? "bg-primary/15"
+                      : "bg-primary/10"
+                  }`}
+                >
+                  <Sparkles
+                    className={`size-4 text-primary ${
+                      isTokenCountCalculating
+                        ? "animate-[aiContextSparkle_1.4s_ease-in-out_infinite]"
+                        : ""
+                    }`}
+                  />
                 </div>
 
                 <div>
-                  <div className="text-sm font-medium">
+                  <div className="flex items-center gap-2 text-sm font-medium">
                     AI Context
+
+                    {isTokenCountCalculating && (
+                      <span className="flex items-center gap-0.5">
+                        <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
+
+                        <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
+
+                        <span className="size-1 animate-bounce rounded-full bg-primary" />
+                      </span>
+                    )}
                   </div>
 
                   <div className="text-[11px] text-muted-foreground">
-                    Context available to Mnemeona AI
+                    {isTokenCountCalculating
+                      ? "Calculating token usage…"
+                      : "Context available to Mnemeona AI"}
                   </div>
                 </div>
               </div>
@@ -326,7 +539,9 @@ export default function App() {
                 variant="ghost"
                 size="icon"
                 onClick={() =>
-                  setShowAIContext(false)
+                  setShowAIContext(
+                    false,
+                  )
                 }
               >
                 <X className="size-4" />
@@ -345,8 +560,12 @@ export default function App() {
       {/* -------------------------------------------------- */}
 
       <AISettingsDialog
-        open={showAISettings}
-        onOpenChange={setShowAISettings}
+        open={
+          showAISettings
+        }
+        onOpenChange={
+          setShowAISettings
+        }
       />
 
       {/* -------------------------------------------------- */}
@@ -366,6 +585,7 @@ export default function App() {
           >
             <div className="flex flex-col items-center text-center">
               {/* Spinner */}
+
               <div className="mb-5 flex size-12 items-center justify-center rounded-full border-2 border-muted border-t-primary animate-spin">
                 <Sparkles className="size-5 text-primary" />
               </div>
@@ -386,6 +606,37 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* -------------------------------------------------- */}
+      {/* AI Context Animations */}
+      {/* -------------------------------------------------- */}
+
+      <style>
+        {`
+          @keyframes aiContextSweep {
+            0% {
+              transform: translateX(-100%);
+            }
+
+            100% {
+              transform: translateX(200%);
+            }
+          }
+
+          @keyframes aiContextSparkle {
+            0%,
+            100% {
+              transform: scale(1) rotate(0deg);
+              opacity: 0.7;
+            }
+
+            50% {
+              transform: scale(1.18) rotate(8deg);
+              opacity: 1;
+            }
+          }
+        `}
+      </style>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import {
   buildSystemPrompt,
   loadAIConfig,
+  loadSceneAIContext,
 } from "./aiService"
 
 import type { MnemeonaProject } from "@/types/project"
@@ -30,21 +31,32 @@ export interface AITokenCount {
   tokenizerError:
     | string
     | null
+
+  isCalculating: boolean
 }
+
+export interface AITokenCountRequest {
+  project: MnemeonaProject
+  activeScene: ProjectScene
+  responseTokens: number
+
+  messages?: {
+    role:
+      | "system"
+      | "user"
+      | "assistant"
+
+    content: string
+  }[]
+}
+
+// --------------------------------------------------
+// Ollama
+// --------------------------------------------------
 
 interface OllamaChatResponse {
   prompt_eval_count?: unknown
-
-  eval_count?: unknown
-
-  done?: boolean
-
   error?: string
-
-  message?: {
-    role?: string
-    content?: string
-  }
 }
 
 interface OllamaShowResponse {
@@ -55,10 +67,6 @@ interface OllamaShowResponse {
     unknown
   >
 }
-
-// --------------------------------------------------
-// Ollama URL
-// --------------------------------------------------
 
 function getOllamaBaseUrl(
   endpoint: string,
@@ -137,10 +145,10 @@ function extractSceneText(
 }
 
 // --------------------------------------------------
-// Prompt Messages
+// Token Input
 // --------------------------------------------------
 
-interface TokenMessage {
+export interface TokenMessage {
   role:
     | "system"
     | "user"
@@ -150,17 +158,16 @@ interface TokenMessage {
 }
 
 /**
- * Builds the messages that represent the prompt being
- * measured.
+ * Builds the prompt representation used for token counting.
  *
- * The scene text is included for token accounting, but
- * is intentionally NOT shown in the Formatted AI Context
- * section of the UI.
+ * The scene prose is intentionally included in the token
+ * calculation because it is part of the actual AI request,
+ * but it is NOT displayed in the Formatted AI Context UI.
  */
-function buildTokenMessages(
+export function buildTokenizerMessages(
   project: MnemeonaProject,
   activeScene: ProjectScene,
-  messages: TokenMessage[],
+  messages: TokenMessage[] = [],
 ): TokenMessage[] {
   const systemPrompt =
     buildSystemPrompt(
@@ -173,36 +180,65 @@ function buildTokenMessages(
       activeScene,
     )
 
-  return [
+  const additionalContext =
+    loadSceneAIContext(
+      activeScene.id,
+    ).trim()
+
+  const result: TokenMessage[] = [
     {
       role: "system",
       content:
         systemPrompt,
     },
-
-    ...(sceneText
-      ? [
-          {
-            role: "user" as const,
-            content:
-              `CURRENT SCENE TEXT:\n\n${sceneText}`,
-          },
-        ]
-      : []),
-
-    ...messages,
   ]
+
+  /*
+   * The current scene is sent as part of the request
+   * context for token accounting.
+   */
+  if (sceneText) {
+    result.push({
+      role: "user",
+      content:
+        `CURRENT SCENE TEXT:\n${sceneText}`,
+    })
+  }
+
+  /*
+   * buildSystemPrompt() already includes the scene-specific
+   * context. Do not add it a second time.
+   */
+  if (
+    additionalContext &&
+    !systemPrompt.includes(
+      additionalContext,
+    )
+  ) {
+    result.push({
+      role: "user",
+      content:
+        `SCENE-SPECIFIC CONTEXT:\n${additionalContext}`,
+    })
+  }
+
+  result.push(
+    ...messages,
+  )
+
+  return result
 }
 
 // --------------------------------------------------
-// Fallback Estimation
+// Approximate Count
 // --------------------------------------------------
 
 /**
- * Deliberately approximate.
+ * Approximate only.
  *
- * This is only used while waiting for Ollama's actual
- * model-side token count or if the model cannot provide one.
+ * This is deliberately simple because it is only shown while
+ * waiting for the selected Ollama model to calculate the real
+ * prompt token count.
  */
 export function estimateTokens(
   text: string,
@@ -216,50 +252,49 @@ export function estimateTokens(
   )
 }
 
-/**
- * Creates the approximate result immediately.
- *
- * This allows the UI to show useful information while
- * Ollama is still processing the real token count.
- */
-export function createApproximateAIRequestTokens(
-  project: MnemeonaProject,
-  activeScene: ProjectScene,
-  responseTokens: number,
-  messages: TokenMessage[] = [],
-  contextLength: number | null = null,
-): AITokenCount {
-  const tokenMessages =
-    buildTokenMessages(
-      project,
-      activeScene,
-      messages,
-    )
-
-  const promptText =
-    tokenMessages
+function approximateMessages(
+  messages: TokenMessage[],
+): number {
+  const text =
+    messages
       .map(
         (message) =>
           `${message.role}\n${message.content}`,
       )
       .join("\n\n")
 
-  const promptTokens =
-    estimateTokens(
-      promptText,
+  return estimateTokens(
+    text,
+  )
+}
+
+export function createApproximateAIRequestTokens(
+  request: AITokenCountRequest,
+  contextLength: number | null,
+): AITokenCount {
+  const messages =
+    buildTokenizerMessages(
+      request.project,
+      request.activeScene,
+      request.messages ?? [],
     )
 
-  const normalizedResponseTokens =
+  const promptTokens =
+    approximateMessages(
+      messages,
+    )
+
+  const responseTokens =
     Math.max(
       0,
       Math.floor(
-        responseTokens,
+        request.responseTokens,
       ),
     )
 
   const totalTokens =
     promptTokens +
-    normalizedResponseTokens
+    responseTokens
 
   const percentage =
     contextLength &&
@@ -275,8 +310,7 @@ export function createApproximateAIRequestTokens(
   return {
     promptTokens,
 
-    responseTokens:
-      normalizedResponseTokens,
+    responseTokens,
 
     totalTokens,
 
@@ -292,21 +326,23 @@ export function createApproximateAIRequestTokens(
 
     tokenizerError:
       "Waiting for Ollama to provide the actual model token count.",
+
+    isCalculating:
+      true,
   }
 }
 
 // --------------------------------------------------
-// Model Token Count
+// Actual Model Count
 // --------------------------------------------------
 
 /**
- * Ask Ollama to evaluate the exact prompt through /api/chat.
+ * Ollama does not expose /api/tokenize on the user's setup.
  *
- * We intentionally do NOT use /api/tokenize because the user's
- * Ollama installation does not expose that endpoint.
+ * Instead we send the exact prompt to /api/chat with
+ * num_predict: 0 and read prompt_eval_count.
  *
- * num_predict: 0 prevents generation while allowing Ollama
- * to evaluate the prompt and return prompt_eval_count.
+ * This is the count generated by the selected model itself.
  */
 async function countPromptTokensWithModel(
   messages: TokenMessage[],
@@ -501,7 +537,7 @@ async function countPromptTokensWithModel(
 }
 
 // --------------------------------------------------
-// Model Context Window
+// Context Window
 // --------------------------------------------------
 
 export async function getModelContextLength(
@@ -545,7 +581,8 @@ export async function getModelContextLength(
             model:
               config.model,
 
-            verbose: true,
+            verbose:
+              true,
           }),
 
           signal,
@@ -642,53 +679,22 @@ export async function getModelContextLength(
 }
 
 // --------------------------------------------------
-// Complete Token Calculation
+// Calculation
 // --------------------------------------------------
 
-export async function estimateAIRequestTokens(
-  project: MnemeonaProject,
-  activeScene: ProjectScene,
-  responseTokens: number,
-  messages: TokenMessage[] = [],
+export async function calculateAIRequestTokens(
+  request: AITokenCountRequest,
   signal?: AbortSignal,
 ): Promise<AITokenCount> {
-  const tokenMessages =
-    buildTokenMessages(
-      project,
-      activeScene,
-      messages,
-    )
-
-  const normalizedResponseTokens =
-    Math.max(
-      0,
-      Math.floor(
-        responseTokens,
-      ),
+  const messages =
+    buildTokenizerMessages(
+      request.project,
+      request.activeScene,
+      request.messages ?? [],
     )
 
   /*
-   * Calculate the fallback immediately.
-   */
-  const promptText =
-    tokenMessages
-      .map(
-        (message) =>
-          `${message.role}\n${message.content}`,
-      )
-      .join("\n\n")
-
-  const approximatePromptTokens =
-    estimateTokens(
-      promptText,
-    )
-
-  const approximateTotalTokens =
-    approximatePromptTokens +
-    normalizedResponseTokens
-
-  /*
-   * Fetch the model context size independently.
+   * Get context size independently.
    */
   const contextLength =
     await getModelContextLength(
@@ -696,16 +702,16 @@ export async function estimateAIRequestTokens(
     )
 
   /*
-   * Ask the actual model for its prompt token count.
+   * Ask the actual model for its prompt count.
    */
   const modelResult =
     await countPromptTokensWithModel(
-      tokenMessages,
+      messages,
       signal,
     )
 
   /*
-   * Ollama successfully gave us the actual count.
+   * Model tokenizer succeeded.
    */
   if (
     modelResult.count !==
@@ -714,9 +720,17 @@ export async function estimateAIRequestTokens(
     const promptTokens =
       modelResult.count
 
+    const responseTokens =
+      Math.max(
+        0,
+        Math.floor(
+          request.responseTokens,
+        ),
+      )
+
     const totalTokens =
       promptTokens +
-      normalizedResponseTokens
+      responseTokens
 
     const percentage =
       contextLength &&
@@ -732,8 +746,7 @@ export async function estimateAIRequestTokens(
     return {
       promptTokens,
 
-      responseTokens:
-        normalizedResponseTokens,
+      responseTokens,
 
       totalTokens,
 
@@ -749,50 +762,285 @@ export async function estimateAIRequestTokens(
 
       tokenizerError:
         null,
+
+      isCalculating:
+        false,
     }
   }
 
   /*
-   * Ollama failed to provide the actual count.
-   *
-   * Return the approximate number instead of hiding
-   * the gauge.
+   * Actual tokenizer unavailable.
+   * Keep the approximate number visible.
    */
-  const approximatePercentage =
-    contextLength &&
-    contextLength > 0
-      ? Math.min(
-          100,
-          (approximateTotalTokens /
-            contextLength) *
-            100,
-        )
-      : null
+  const approximate =
+    createApproximateAIRequestTokens(
+      request,
+      contextLength,
+    )
 
   return {
-    promptTokens:
-      approximatePromptTokens,
-
-    responseTokens:
-      normalizedResponseTokens,
-
-    totalTokens:
-      approximateTotalTokens,
-
-    contextLength,
-
-    percentage:
-      approximatePercentage,
-
-    source:
-      "estimate",
-
-    tokenizerAvailable:
-      false,
+    ...approximate,
 
     tokenizerError:
       modelResult.error,
+
+    isCalculating:
+      false,
   }
+}
+
+// --------------------------------------------------
+// Persistent Token Store
+// --------------------------------------------------
+
+interface TokenStoreEntry {
+  key: string
+  value: AITokenCount
+  promise: Promise<void> | null
+  controller: AbortController | null
+}
+
+const tokenStore =
+  new Map<
+    string,
+    TokenStoreEntry
+  >()
+
+const tokenListeners =
+  new Set<
+    () => void
+  >()
+
+function notifyTokenListeners(): void {
+  for (const listener of tokenListeners) {
+    listener()
+  }
+}
+
+export function subscribeAITokenCounts(
+  listener: () => void,
+): () => void {
+  tokenListeners.add(
+    listener,
+  )
+
+  return () => {
+    tokenListeners.delete(
+      listener,
+    )
+  }
+}
+
+export function getAITokenCount(
+  key: string,
+): AITokenCount | null {
+  return (
+    tokenStore.get(
+      key,
+    )?.value ?? null
+  )
+}
+
+function stableProjectKey(
+  project: MnemeonaProject,
+): string {
+  try {
+    return JSON.stringify(
+      project,
+    )
+  } catch {
+    return String(
+      project,
+    )
+  }
+}
+
+export function createAITokenCountKey(
+  request: AITokenCountRequest,
+): string {
+  const projectKey =
+    stableProjectKey(
+      request.project,
+    )
+
+  const sceneText =
+    extractSceneText(
+      request.activeScene,
+    )
+
+  const additionalContext =
+    loadSceneAIContext(
+      request.activeScene.id,
+    )
+
+  const config =
+    loadAIConfig()
+
+  const messagesKey =
+    JSON.stringify(
+      request.messages ?? [],
+    )
+
+  return [
+    config.endpoint,
+    config.model,
+    request.activeScene.id,
+    request.responseTokens,
+    sceneText,
+    additionalContext,
+    projectKey,
+    messagesKey,
+  ].join("|")
+}
+
+/**
+ * Starts or reuses the calculation for a prompt.
+ *
+ * This function deliberately lives outside React.
+ *
+ * Therefore closing AIContextPanel does NOT cancel the request.
+ */
+export function ensureAITokenCount(
+  request: AITokenCountRequest,
+): string {
+  const key =
+    createAITokenCountKey(
+      request,
+    )
+
+  const existing =
+    tokenStore.get(key)
+
+  if (
+    existing?.promise
+  ) {
+    return key
+  }
+
+  if (
+    existing?.value &&
+    existing.value.source ===
+      "model" &&
+    !existing.value.isCalculating
+  ) {
+    return key
+  }
+
+  const approximate =
+    createApproximateAIRequestTokens(
+      request,
+      existing?.value.contextLength ??
+        null,
+    )
+
+  const controller =
+    new AbortController()
+
+  const entry: TokenStoreEntry =
+    existing ?? {
+      key,
+      value:
+        approximate,
+      promise: null,
+      controller: null,
+    }
+
+  entry.value =
+    approximate
+
+  entry.controller =
+    controller
+
+  const promise =
+    calculateAIRequestTokens(
+      request,
+      controller.signal,
+    )
+      .then(
+        (result) => {
+          entry.value =
+            result
+
+          entry.promise =
+            null
+
+          entry.controller =
+            null
+
+          notifyTokenListeners()
+        },
+      )
+      .catch(
+        (error) => {
+          if (
+            controller.signal
+              .aborted
+          ) {
+            return
+          }
+
+          entry.value = {
+            ...approximate,
+
+            tokenizerError:
+              error instanceof
+              Error
+                ? error.message
+                : "Unable to calculate the model token count.",
+
+            isCalculating:
+              false,
+          }
+
+          entry.promise =
+            null
+
+          entry.controller =
+            null
+
+          notifyTokenListeners()
+        },
+      )
+
+  entry.promise =
+    promise
+
+  tokenStore.set(
+    key,
+    entry,
+  )
+
+  notifyTokenListeners()
+
+  return key
+}
+
+export function invalidateAITokenCount(
+  request: AITokenCountRequest,
+): void {
+  const key =
+    createAITokenCountKey(
+      request,
+    )
+
+  const entry =
+    tokenStore.get(key)
+
+  if (!entry) {
+    return
+  }
+
+  /*
+   * Do not cancel here.
+   *
+   * The calculation may still be useful if the panel
+   * is reopened. Removing the cache entry is enough.
+   */
+  tokenStore.delete(
+    key,
+  )
+
+  notifyTokenListeners()
 }
 
 // --------------------------------------------------

@@ -31,12 +31,7 @@ import {
   saveSceneAIContext,
 } from "@/components/ai/aiservice/aiService"
 
-import {
-  createApproximateAIRequestTokens,
-  estimateAIRequestTokens,
-  formatTokenCount,
-  type AITokenCount,
-} from "@/components/ai/aiservice/aiTokenCounter"
+import { useAITokenCount } from "@/components/ai/aiservice/useAITokenCount"
 
 interface AIContextPanelProps {
   onClose?: () => void
@@ -62,22 +57,9 @@ export function AIContextPanel({
     setSceneAIContext,
   ] = useState("")
 
-  const [
-    tokenCount,
-    setTokenCount,
-  ] = useState<AITokenCount | null>(
-    null,
-  )
-
-  const [
-    tokenCountLoading,
-    setTokenCountLoading,
-  ] = useState(false)
-
-  // --------------------------------------------------
-  // Scene Context
-  // --------------------------------------------------
-
+  /*
+   * Load scene-specific instructions.
+   */
   useEffect(() => {
     if (!activeScene) {
       setSceneAIContext("")
@@ -93,146 +75,42 @@ export function AIContextPanel({
     activeScene?.id,
   ])
 
-  // --------------------------------------------------
-  // Response Length
-  // --------------------------------------------------
-
+  /*
+   * Load the saved Continue AI token budget.
+   */
   useEffect(() => {
     setContinueWritingLength(
       loadContinueWritingLength(),
     )
   }, [])
 
-  // --------------------------------------------------
-  // Token Gauge
-  // --------------------------------------------------
+  /*
+   * Keep messages stable.
+   *
+   * The panel is showing the base Continue AI prompt context,
+   * so there are no extra chat messages here.
+   */
+  const messages:
+    | undefined = undefined
 
-  useEffect(() => {
-    if (!activeScene) {
-      setTokenCount(null)
-      return
-    }
-
-    const controller =
-      new AbortController()
-
-    let cancelled = false
-
-    /*
-     * The Continue AI request currently uses the scene text
-     * as part of the model input. We count it here but do not
-     * display it in Formatted AI Context.
-     */
-    const messages: {
-      role:
-        | "system"
-        | "user"
-        | "assistant"
-
-      content: string
-    }[] = []
-
-    /*
-     * IMPORTANT:
-     *
-     * Put an approximate result into the UI immediately.
-     * The user should never see an empty gauge just because
-     * Ollama is taking time to answer.
-     */
-    const approximate =
-      createApproximateAIRequestTokens(
-        project,
-        activeScene,
-        continueWritingLength,
-        messages,
-      )
-
-    setTokenCount(
-      approximate,
-    )
-
-    setTokenCountLoading(
-      true,
-    )
-
-    const updateTokenCount =
-      async () => {
-        try {
-          const result =
-            await estimateAIRequestTokens(
-              project,
-              activeScene,
-              continueWritingLength,
-              messages,
-              controller.signal,
-            )
-
-          if (
-            cancelled
-          ) {
-            return
-          }
-
-          setTokenCount(
-            result,
-          )
-        } catch (error) {
-          if (
-            cancelled
-          ) {
-            return
-          }
-
-          /*
-           * Keep the approximate value visible if
-           * the actual count fails.
-           */
-          setTokenCount(
-            (current) => {
-              if (!current) {
-                return approximate
-              }
-
-              return {
-                ...current,
-
-                source:
-                  "estimate",
-
-                tokenizerAvailable:
-                  false,
-
-                tokenizerError:
-                  error instanceof
-                  Error
-                    ? error.message
-                    : "Unable to obtain the actual model token count.",
-              }
-            },
-          )
-        } finally {
-          if (
-            !cancelled
-          ) {
-            setTokenCountLoading(
-              false,
-            )
-          }
-        }
-      }
-
-    void updateTokenCount()
-
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [
+  /*
+   * IMPORTANT:
+   *
+   * This hook is persistent outside the panel lifecycle.
+   *
+   * Closing this panel does NOT abort the Ollama request.
+   */
+  const {
+    tokenCount,
+    isCalculating,
+    isApproximate,
+  } = useAITokenCount({
     project,
     activeScene,
-    continueWritingLength,
-    sceneAIContext,
-  ])
+    responseTokens:
+      continueWritingLength,
+    messages,
+  })
 
   // --------------------------------------------------
   // Empty State
@@ -317,6 +195,12 @@ export function AIContextPanel({
       saveContinueWritingLength(
         nextValue,
       )
+
+      window.dispatchEvent(
+        new Event(
+          "mnemeona:continue-writing-length-changed",
+        ),
+      )
     }
 
   const handleSceneContextChange =
@@ -332,17 +216,6 @@ export function AIContextPanel({
         value,
       )
     }
-
-  // --------------------------------------------------
-  // Gauge
-  // --------------------------------------------------
-
-  const percentage =
-    tokenCount?.percentage
-
-  const isApproximate =
-    tokenCount?.source ===
-    "estimate"
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -380,7 +253,7 @@ export function AIContextPanel({
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
-          {/* Continue AI */}
+          {/* Continue AI Settings */}
           <section>
             <div className="rounded-xl border bg-card p-5">
               <div className="mb-5">
@@ -491,7 +364,7 @@ export function AIContextPanel({
             </div>
           </section>
 
-          {/* Prompt Context Gauge */}
+          {/* Prompt Context */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -499,8 +372,8 @@ export function AIContextPanel({
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                Includes the current scene, AI context, and your
-                selected response budget.
+                Includes the current scene and the context that will be
+                sent to the model, plus the selected response budget.
               </p>
             </div>
 
@@ -508,20 +381,16 @@ export function AIContextPanel({
               {tokenCount ? (
                 <>
                   <div className="flex items-start justify-between gap-4">
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-lg font-semibold">
                           {isApproximate
                             ? "≈ "
                             : ""}
-                          {formatTokenCount(
-                            tokenCount.totalTokens,
-                          )}
+                          {tokenCount.totalTokens.toLocaleString()}
 
                           {tokenCount.contextLength
-                            ? ` / ${formatTokenCount(
-                                tokenCount.contextLength,
-                              )}`
+                            ? ` / ${tokenCount.contextLength.toLocaleString()}`
                             : ""}{" "}
                           tokens
                         </p>
@@ -537,21 +406,15 @@ export function AIContextPanel({
                         )}
                       </div>
 
-                      {isApproximate ? (
-                        <div className="mt-2 space-y-1">
-                          <p className="text-xs font-medium text-amber-600">
-                            {tokenCountLoading
-                              ? "Waiting for Ollama to provide the actual token count…"
-                              : "Ollama could not provide the actual token count."}
-                          </p>
+                      {isApproximate && (
+                        <p className="mt-2 text-xs text-amber-600">
+                          {isCalculating
+                            ? "Waiting for Ollama to calculate the actual token count…"
+                            : "Ollama could not provide the actual token count, so the approximate count is being shown."}
+                        </p>
+                      )}
 
-                          <p className="text-xs text-muted-foreground">
-                            The number shown is an approximate
-                            estimate and may differ from the model's
-                            actual tokenizer count.
-                          </p>
-                        </div>
-                      ) : (
+                      {!isApproximate && (
                         <p className="mt-1 text-xs text-muted-foreground">
                           Token count reported by the selected Ollama
                           model.
@@ -559,12 +422,13 @@ export function AIContextPanel({
                       )}
                     </div>
 
-                    {percentage !== null ? (
+                    {tokenCount.percentage !==
+                    null ? (
                       <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
                         {isApproximate
                           ? "≈ "
                           : ""}
-                        {percentage.toFixed(
+                        {tokenCount.percentage.toFixed(
                           1,
                         )}
                         %
@@ -576,33 +440,46 @@ export function AIContextPanel({
                     )}
                   </div>
 
-                  {/* Gauge */}
-                  <div className="mt-4">
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      {percentage !== null ? (
-                        <div
-                          className={`h-full rounded-full transition-all duration-300 ${
-                            isApproximate
-                              ? "bg-primary/40"
-                              : "bg-primary"
-                          }`}
-                          style={{
-                            width: `${Math.min(
-                              100,
-                              Math.max(
-                                0,
-                                percentage,
-                              ),
-                            )}%`,
-                          }}
-                        />
-                      ) : (
-                        <div className="h-full w-full animate-pulse bg-primary/20" />
-                      )}
-                    </div>
-                  </div>
+                  {/* Animated calculation indicator */}
+                  {isCalculating && (
+                    <div className="mt-4">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div className="h-full w-1/3 animate-[tokenGauge_1.4s_ease-in-out_infinite] rounded-full bg-primary/70" />
+                      </div>
 
-                  {/* Token breakdown */}
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Ollama is evaluating the prompt with the
+                        selected model…
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Static gauge */}
+                  {!isCalculating && (
+                    <div className="mt-4">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        {tokenCount.percentage !==
+                        null ? (
+                          <div
+                            className="h-full rounded-full bg-primary transition-all duration-300"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.max(
+                                  0,
+                                  tokenCount.percentage,
+                                ),
+                              )}%`,
+                            }}
+                          />
+                        ) : (
+                          <div className="h-full w-full bg-primary/20" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Breakdown */}
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <div className="rounded-lg bg-muted/40 p-3">
                       <p className="text-xs text-muted-foreground">
@@ -613,9 +490,7 @@ export function AIContextPanel({
                         {isApproximate
                           ? "≈ "
                           : ""}
-                        {formatTokenCount(
-                          tokenCount.promptTokens,
-                        )}
+                        {tokenCount.promptTokens.toLocaleString()}
                       </p>
 
                       {isApproximate && (
@@ -631,14 +506,12 @@ export function AIContextPanel({
                       </p>
 
                       <p className="mt-1 font-medium">
-                        {formatTokenCount(
-                          tokenCount.responseTokens,
-                        )}
+                        {tokenCount.responseTokens.toLocaleString()}
                       </p>
                     </div>
                   </div>
 
-                  {/* Ollama status */}
+                  {/* Status */}
                   {isApproximate &&
                     tokenCount.tokenizerError && (
                       <p className="mt-3 break-words text-xs text-muted-foreground">
@@ -647,7 +520,7 @@ export function AIContextPanel({
                       </p>
                     )}
 
-                  {/* Context warnings */}
+                  {/* Context warning */}
                   {tokenCount.contextLength &&
                     tokenCount.totalTokens >
                       tokenCount.contextLength && (
@@ -670,10 +543,10 @@ export function AIContextPanel({
                     )}
                 </>
               ) : (
-                <div className="py-3">
+                <div>
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium">
-                      Calculating prompt size…
+                      Preparing prompt estimate…
                     </p>
 
                     <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600">
@@ -681,17 +554,20 @@ export function AIContextPanel({
                     </span>
                   </div>
 
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full w-1/3 animate-[tokenGauge_1.4s_ease-in-out_infinite] rounded-full bg-primary/70" />
+                  </div>
+
                   <p className="mt-2 text-xs text-muted-foreground">
-                    We are calculating an approximate token count while
-                    waiting for Ollama to provide the actual model
-                    token count.
+                    Waiting for Ollama to calculate the actual token
+                    count…
                   </p>
                 </div>
               )}
             </div>
           </section>
 
-          {/* Context Summary */}
+          {/* Context summary */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -730,7 +606,7 @@ export function AIContextPanel({
 
               <ContextStat
                 icon={MessageSquare}
-                label="Formatted Context Tokens"
+                label="Estimated Tokens"
                 value={
                   formatted.estimatedTokens
                 }
@@ -769,7 +645,7 @@ export function AIContextPanel({
             </div>
           </section>
 
-          {/* Current Scene */}
+          {/* Scene */}
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -832,7 +708,7 @@ export function AIContextPanel({
             </div>
           </section>
 
-          {/* Formatted Context */}
+          {/* Formatted context */}
           <section className="pb-8">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
@@ -841,17 +717,16 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  This is the exact text currently produced by the
-                  context formatter. The scene prose is counted for the
-                  prompt gauge but is not duplicated here.
+                  This is the exact context generated for the AI.
+                  Scene prose is counted separately and is not duplicated
+                  here.
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Eye className="h-4 w-4" />
 
-                {formatted.estimatedTokens.toLocaleString()}{" "}
-                tokens
+                {formatted.estimatedTokens} tokens
               </div>
             </div>
 
@@ -861,6 +736,21 @@ export function AIContextPanel({
           </section>
         </div>
       </div>
+
+      {/* Loading animation */}
+      <style>
+        {`
+          @keyframes tokenGauge {
+            0% {
+              transform: translateX(-120%);
+            }
+
+            100% {
+              transform: translateX(420%);
+            }
+          }
+        `}
+      </style>
     </div>
   )
 }
