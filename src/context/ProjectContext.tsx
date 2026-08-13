@@ -19,7 +19,7 @@ import {
 import * as projectActions from "./project/projectActions"
 import * as manuscriptActions from "./manuscript/manuscriptActions"
 import * as characterActions from "./character/characterActions"
-import * as locationActions from "./location/locationActions"
+import * as locationActions from "./world/location/locationActions"
 
 import type { MnemeonaProject } from "@/types/project"
 
