@@ -16,6 +16,12 @@ import { useProject } from "@/context/ProjectContext"
 import { EditorToolbar } from "./EditorToolbar"
 import { AITextMark } from "./AITextMark"
 
+import {
+  loadContinueWritingLength,
+  loadSceneAIContext,
+  streamAIChat,
+} from "@/components/ai/aiservice/aiService"
+
 import "./NovelEditor.css"
 
 export function NovelEditor() {
@@ -25,36 +31,39 @@ export function NovelEditor() {
     updateSceneContent,
   } = useProject()
 
-  const [aiGenerating, setAIGenerating] =
-    useState(false)
+  const [
+    aiGenerating,
+    setAIGenerating,
+  ] = useState(false)
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Underline,
-      AITextMark,
+  const editor =
+    useEditor({
+      extensions: [
+        StarterKit,
+        Underline,
+        AITextMark,
 
-      Placeholder.configure({
-        emptyEditorClass:
-          "is-editor-empty",
-      }),
-    ],
-
-    content: {
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-        },
+        Placeholder.configure({
+          emptyEditorClass:
+            "is-editor-empty",
+        }),
       ],
-    },
 
-    editorProps: {
-      attributes: {
-        class: "focus:outline-none",
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+          },
+        ],
       },
-    },
-  })
+
+      editorProps: {
+        attributes: {
+          class: "focus:outline-none",
+        },
+      },
+    })
 
   // --------------------------------------------------
   // Keep editor editable state synchronized
@@ -94,7 +103,9 @@ export function NovelEditor() {
       },
     )
 
-    editor.commands.focus("start")
+    editor.commands.focus(
+      "start",
+    )
   }, [
     editor,
     activeScene?.id,
@@ -105,7 +116,10 @@ export function NovelEditor() {
   // --------------------------------------------------
 
   useEffect(() => {
-    if (!editor || !activeScene) {
+    if (
+      !editor ||
+      !activeScene
+    ) {
       return
     }
 
@@ -163,28 +177,42 @@ export function NovelEditor() {
           return
         }
 
-        setAIGenerating(true)
+        setAIGenerating(
+          true,
+        )
 
         /*
-         * IMPORTANT:
+         * Read the current response-length setting
+         * at the exact moment Continue AI is pressed.
+         */
+        const continueWritingTokens =
+          loadContinueWritingLength()
+
+        /*
+         * Read the current scene-specific context.
          *
-         * Continue must ALWAYS start from the
-         * actual end of the document.
+         * This is also loaded at generation time so
+         * changing it in the AI Context panel does not
+         * require the editor to be recreated.
+         */
+        const sceneAIContext =
+          loadSceneAIContext(
+            activeScene.id,
+          ).trim()
+
+        /*
+         * Continue must ALWAYS start from the actual
+         * end of the document.
          *
          * Do NOT use editor.state.selection.from
-         * here because the author's cursor may be
-         * somewhere in the middle of a long scene.
+         * because the author's cursor may be somewhere
+         * in the middle of a long scene.
          */
         const documentEnd =
           editor.state.doc.content.size
 
         /*
-         * Get the actual text at the end of the
-         * current scene.
-         *
-         * We give the AI the complete text that
-         * currently exists before the insertion
-         * point so it can continue naturally.
+         * Get the actual text currently in the scene.
          */
         const existingText =
           editor.state.doc.textBetween(
@@ -196,23 +224,36 @@ export function NovelEditor() {
         const messages = [
           {
             role: "user" as const,
+
             content: `Continue writing the current scene from the EXACT END of the author's existing text.
 
-The author's current scene ends with:
+The author's current scene is:
 
 ${existingText}
 
 Continue naturally from the final sentence and final word above.
 
 IMPORTANT:
-- Write only the continuation prose.
+- Write ONLY new continuation prose.
 - Do not explain what you are doing.
 - Do not repeat any existing text.
 - Do not restart or rewrite the scene.
-- Continue directly from the final word of the author's text.
+- Continue directly from the end of the existing manuscript.
 - Maintain the current POV, tense, tone, characters, setting, pacing, and narrative style.
-- Treat everything above as existing manuscript text.
-- The continuation must begin after the existing manuscript, not before it.`,
+- Treat the supplied manuscript as existing text that must not be repeated.
+- The requested response length is ${continueWritingTokens} tokens.
+- Use the available response length to produce a substantial continuation.
+- Do not intentionally make the response short.
+- Do not summarize the continuation.
+- Output only the new prose.${
+              sceneAIContext
+                ? `
+
+ADDITIONAL SCENE-SPECIFIC AUTHOR INSTRUCTIONS:
+
+${sceneAIContext}`
+                : ""
+            }`,
           },
         ]
 
@@ -224,7 +265,7 @@ IMPORTANT:
          * insertion.
          */
         let insertionPosition =
-          editor.state.doc.content.size
+          documentEnd
 
         try {
           const {
@@ -251,6 +292,14 @@ IMPORTANT:
             project,
             activeScene,
 
+            /*
+             * IMPORTANT:
+             *
+             * This is now the exact token value from
+             * the UI. No word/token conversion occurs.
+             */
+            continueWritingTokens,
+
             onToken: (
               token,
             ) => {
@@ -261,10 +310,6 @@ IMPORTANT:
               /*
                * Always insert at the explicit
                * insertion position.
-               *
-               * This prevents the streamed response
-               * from accidentally being inserted at
-               * an old/stale cursor position.
                */
               const result =
                 editor
@@ -284,14 +329,8 @@ IMPORTANT:
               }
 
               /*
-               * Re-read the editor's current
-               * document position after insertion.
-               *
-               * This is safer than calculating the
-               * number of characters ourselves because
-               * ProseMirror positions include document
-               * structure, paragraphs, hard breaks,
-               * marks, etc.
+               * Re-read the editor's current document
+               * position after insertion.
                */
               insertionPosition =
                 editor.state.selection.from
@@ -313,10 +352,6 @@ IMPORTANT:
 
           /*
            * Explicitly save the final document.
-           *
-           * This guarantees the generated continuation
-           * is persisted even though normal update
-           * handling is disabled during AI generation.
            */
           updateSceneContent(
             activeScene.id,
@@ -336,16 +371,17 @@ IMPORTANT:
             .chain()
             .focus()
             .setTextSelection(
-              insertionPosition,
+              Math.min(
+                insertionPosition,
+                editor.state.doc.content.size,
+              ),
             )
             .unsetMark("aiText")
             .run()
         } finally {
-          /*
-           * This ALWAYS runs, whether AI
-           * succeeds or fails.
-           */
-          setAIGenerating(false)
+          setAIGenerating(
+            false,
+          )
         }
       }
 

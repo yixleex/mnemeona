@@ -12,6 +12,24 @@ import type { MnemeonaProject } from "@/types/project"
 const STORAGE_KEY =
   "mnemeona-ai-settings"
 
+const CONTINUE_WRITING_TOKENS_KEY =
+  "mnemeona-ai-continue-writing-tokens"
+
+const SCENE_AI_CONTEXT_PREFIX =
+  "mnemeona-ai-scene-context:"
+
+const DEFAULT_CONTINUE_WRITING_TOKENS =
+  1024
+
+const MIN_CONTINUE_WRITING_TOKENS =
+  128
+
+const MAX_CONTINUE_WRITING_TOKENS =
+  4096
+
+const CONTINUE_WRITING_TOKEN_STEP =
+  128
+
 // --------------------------------------------------
 // Types
 // --------------------------------------------------
@@ -62,6 +80,12 @@ export interface AIChatOptions {
    * automatically generated system prompt.
    */
   systemPrompt?: string
+
+  /*
+   * Maximum number of tokens the model should
+   * generate for this response.
+   */
+  continueWritingTokens?: number
 }
 
 interface AICompletionOptions {
@@ -70,6 +94,108 @@ interface AICompletionOptions {
   activeScene: ProjectScene
   signal?: AbortSignal
   systemPrompt?: string
+}
+
+// --------------------------------------------------
+// Continue AI Response Length
+// --------------------------------------------------
+
+export function loadContinueWritingLength(): number {
+  try {
+    const stored =
+      localStorage.getItem(
+        CONTINUE_WRITING_TOKENS_KEY,
+      )
+
+    if (!stored) {
+      return DEFAULT_CONTINUE_WRITING_TOKENS
+    }
+
+    const parsed =
+      Number(stored)
+
+    if (
+      !Number.isFinite(parsed)
+    ) {
+      return DEFAULT_CONTINUE_WRITING_TOKENS
+    }
+
+    return normalizeContinueWritingTokens(
+      parsed,
+    )
+  } catch {
+    return DEFAULT_CONTINUE_WRITING_TOKENS
+  }
+}
+
+export function saveContinueWritingLength(
+  tokens: number,
+): void {
+  const normalized =
+    normalizeContinueWritingTokens(
+      tokens,
+    )
+
+  localStorage.setItem(
+    CONTINUE_WRITING_TOKENS_KEY,
+    String(normalized),
+  )
+}
+
+function normalizeContinueWritingTokens(
+  tokens: number,
+): number {
+  return Math.min(
+    MAX_CONTINUE_WRITING_TOKENS,
+    Math.max(
+      MIN_CONTINUE_WRITING_TOKENS,
+      Math.round(
+        tokens /
+          CONTINUE_WRITING_TOKEN_STEP,
+      ) *
+        CONTINUE_WRITING_TOKEN_STEP,
+    ),
+  )
+}
+
+// --------------------------------------------------
+// Scene-Specific AI Context
+// --------------------------------------------------
+
+export function loadSceneAIContext(
+  sceneId: string,
+): string {
+  try {
+    return (
+      localStorage.getItem(
+        `${SCENE_AI_CONTEXT_PREFIX}${sceneId}`,
+      ) ?? ""
+    )
+  } catch {
+    return ""
+  }
+}
+
+export function saveSceneAIContext(
+  sceneId: string,
+  context: string,
+): void {
+  const key =
+    `${SCENE_AI_CONTEXT_PREFIX}${sceneId}`
+
+  try {
+    if (!context.trim()) {
+      localStorage.removeItem(key)
+      return
+    }
+
+    localStorage.setItem(
+      key,
+      context,
+    )
+  } catch {
+    // Ignore localStorage failures.
+  }
 }
 
 // --------------------------------------------------
@@ -136,13 +262,26 @@ export function buildAIContext(
     project.storySummary?.trim() ||
     "No story summary has been generated yet."
 
+  const sceneAIContext =
+    loadSceneAIContext(
+      activeScene.id,
+    ).trim()
+
   return `STORY SO FAR:
 
 ${storySummary}
 
 CURRENT STORY CONTEXT:
 
-${formattedContext}`
+${formattedContext}${
+    sceneAIContext
+      ? `
+
+SCENE-SPECIFIC AUTHOR INSTRUCTIONS:
+
+${sceneAIContext}`
+      : ""
+  }`
 }
 
 // --------------------------------------------------
@@ -211,7 +350,10 @@ function buildPreviousScenesContext(
   for (const act of project.manuscript.acts) {
     for (const chapter of act.chapters) {
       for (const scene of chapter.scenes) {
-        if (scene.id === activeScene.id) {
+        if (
+          scene.id ===
+          activeScene.id
+        ) {
           foundActiveScene = true
           break
         }
@@ -251,16 +393,6 @@ ${text}`,
 // Story Summary
 // --------------------------------------------------
 
-/**
- * Generate a concise summary of everything that
- * happened before the current scene.
- *
- * This does NOT modify the project itself.
- *
- * The caller should save the returned summary into:
- *
- * project.storySummary
- */
 export async function generateStorySummary(
   project: MnemeonaProject,
   activeScene: ProjectScene,
@@ -291,13 +423,11 @@ export async function generateStorySummary(
     "(No previous story summary exists.)"
 
   const prompt = `You are maintaining the continuity summary for a novel.
-
 Create an updated summary of what has happened in the story before the current scene.
 
 The summary will be provided to another AI later so that it can understand the story without receiving the entire manuscript.
 
 IMPORTANT RULES:
-
 - Only include events that actually happened in the supplied manuscript.
 - Never invent events, motivations, relationships, facts, or outcomes.
 - Preserve important character actions and decisions.
@@ -362,9 +492,9 @@ function buildSystemPrompt(
 Your job is to help the author develop, understand, and write their story.
 
 IMPORTANT RULES:
-
 - Treat the supplied story context as the source of truth.
 - Treat the story summary as established continuity.
+- Treat scene-specific author instructions as instructions for the current scene.
 - Do not invent established facts about characters, locations, relationships, or events.
 - Maintain continuity with previous events.
 - Maintain continuity with the current scene.
@@ -487,7 +617,9 @@ async function requestAICompletion({
       // Keep default error.
     }
 
-    throw new Error(message)
+    throw new Error(
+      message,
+    )
   }
 
   const data =
@@ -522,6 +654,7 @@ export async function streamAIChat({
   signal,
   onToken,
   systemPrompt,
+  continueWritingTokens,
 }: AIChatOptions): Promise<string> {
   const config =
     loadAIConfig()
@@ -534,11 +667,6 @@ export async function streamAIChat({
       "",
     )
 
-  /*
-   * Use the caller's custom system prompt when
-   * provided. Otherwise use Mnemeona's normal
-   * automatically generated story context.
-   */
   const finalSystemPrompt =
     systemPrompt?.trim()
       ? systemPrompt
@@ -552,6 +680,23 @@ export async function streamAIChat({
     content:
       finalSystemPrompt,
   }
+
+  /*
+   * The UI value is already expressed in tokens,
+   * so pass it directly to Ollama.
+   *
+   * No word/token conversion is performed.
+   */
+  const generationOptions =
+    continueWritingTokens &&
+    continueWritingTokens > 0
+      ? {
+          num_predict:
+            normalizeContinueWritingTokens(
+              continueWritingTokens,
+            ),
+        }
+      : undefined
 
   const response =
     await fetch(
@@ -579,6 +724,13 @@ export async function streamAIChat({
             ...messages,
           ],
 
+          ...(generationOptions
+            ? {
+                options:
+                  generationOptions,
+              }
+            : {}),
+
           stream: true,
         }),
 
@@ -601,7 +753,9 @@ export async function streamAIChat({
       // Keep default error.
     }
 
-    throw new Error(message)
+    throw new Error(
+      message,
+    )
   }
 
   if (!response.body) {
@@ -618,6 +772,53 @@ export async function streamAIChat({
 
   let buffer = ""
   let fullResponse = ""
+
+  const processLine = (
+    line: string,
+  ): boolean => {
+    const trimmed =
+      line.trim()
+
+    if (!trimmed) {
+      return false
+    }
+
+    try {
+      const data =
+        JSON.parse(trimmed)
+
+      if (data?.error) {
+        throw new Error(
+          data.error,
+        )
+      }
+
+      const token =
+        data?.message?.content ??
+        ""
+
+      if (token) {
+        fullResponse += token
+        onToken?.(token)
+      }
+
+      return data?.done === true
+    } catch (error) {
+      /*
+       * Ignore incomplete JSON fragments.
+       * Actual server errors are still thrown.
+       */
+      if (
+        error instanceof Error &&
+        error.message !==
+          "Unexpected end of JSON input"
+      ) {
+        throw error
+      }
+
+      return false
+    }
+  }
 
   try {
     while (true) {
@@ -644,45 +845,26 @@ export async function streamAIChat({
         lines.pop() ?? ""
 
       for (const line of lines) {
-        const trimmed =
-          line.trim()
+        const finished =
+          processLine(line)
 
-        if (!trimmed) {
-          continue
-        }
-
-        try {
-          const data =
-            JSON.parse(trimmed)
-
-          if (data?.error) {
-            throw new Error(
-              data.error,
-            )
-          }
-
-          const token =
-            data?.message?.content ??
-            ""
-
-          if (token) {
-            fullResponse += token
-            onToken?.(token)
-          }
-
-          if (data?.done) {
-            return fullResponse
-          }
-        } catch (error) {
-          if (
-            error instanceof Error &&
-            error.message !==
-              "Unexpected end of JSON input"
-          ) {
-            throw error
-          }
+        if (finished) {
+          return fullResponse
         }
       }
+    }
+
+    /*
+     * Flush any remaining decoder data.
+     */
+    buffer += decoder.decode()
+
+    /*
+     * Process the final buffered JSON object if
+     * Ollama did not end it with a newline.
+     */
+    if (buffer.trim()) {
+      processLine(buffer)
     }
   } finally {
     reader.releaseLock()

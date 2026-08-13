@@ -8,6 +8,11 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Slider } from "@/components/ui/slider"
+import { Textarea } from "@/components/ui/textarea"
+
+import { useEffect, useState } from "react"
 
 import { useProject } from "@/context/ProjectContext"
 
@@ -15,6 +20,13 @@ import {
   buildSceneContext,
   formatStoryContext,
 } from "@/components/ai/context/buildSceneContext"
+
+import {
+  loadContinueWritingLength,
+  loadSceneAIContext,
+  saveContinueWritingLength,
+  saveSceneAIContext,
+} from "@/components/ai/aiservice/aiService"
 
 interface AIContextPanelProps {
   onClose?: () => void
@@ -27,6 +39,46 @@ export function AIContextPanel({
     project,
     activeScene,
   } = useProject()
+
+  const [
+    continueWritingLength,
+    setContinueWritingLength,
+  ] = useState(
+    loadContinueWritingLength(),
+  )
+
+  const [
+    sceneAIContext,
+    setSceneAIContext,
+  ] = useState("")
+
+  /*
+   * Load the scene-specific AI context whenever
+   * the active scene changes.
+   */
+  useEffect(() => {
+    if (!activeScene) {
+      setSceneAIContext("")
+      return
+    }
+
+    setSceneAIContext(
+      loadSceneAIContext(
+        activeScene.id,
+      ),
+    )
+  }, [
+    activeScene?.id,
+  ])
+
+  /*
+   * Load the saved response-length setting.
+   */
+  useEffect(() => {
+    setContinueWritingLength(
+      loadContinueWritingLength(),
+    )
+  }, [])
 
   if (!activeScene) {
     return (
@@ -63,14 +115,59 @@ export function AIContextPanel({
     )
   }
 
-  const context = buildSceneContext(
-    activeScene,
-    project.characters,
-    project.locations,
-  )
+  const context =
+    buildSceneContext(
+      activeScene,
+      project.characters,
+      project.locations,
+    )
 
   const formatted =
     formatStoryContext(context)
+
+  /*
+   * Radix/shadcn Slider can expose either a number
+   * or an array depending on the installed version.
+   *
+   * Handle both so this remains type-safe.
+   */
+  const handleResponseLengthChange = (
+    value:
+      | number
+      | readonly number[],
+  ) => {
+    const nextValue =
+      typeof value === "number"
+        ? value
+        : value[0]
+
+    if (
+      nextValue === undefined
+    ) {
+      return
+    }
+
+    setContinueWritingLength(
+      nextValue,
+    )
+
+    saveContinueWritingLength(
+      nextValue,
+    )
+  }
+
+  const handleSceneContextChange = (
+    value: string,
+  ) => {
+    setSceneAIContext(
+      value,
+    )
+
+    saveSceneAIContext(
+      activeScene.id,
+      value,
+    )
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -108,6 +205,109 @@ export function AIContextPanel({
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
+
+          {/* Continue AI Settings */}
+          <section>
+            <div className="rounded-xl border bg-card p-5">
+              <div className="mb-5">
+                <div className="flex items-center justify-between gap-4">
+                  <Label
+                    htmlFor="continue-writing-length"
+                    className="text-sm font-medium"
+                  >
+                    Response length
+                  </Label>
+
+                  <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
+                    {continueWritingLength.toLocaleString()} tokens
+                  </span>
+                </div>
+
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Controls the maximum number of tokens the AI can
+                  generate when you use Continue AI. This affects the length of the AI text.
+                </p>
+              </div>
+
+              <div className="px-1">
+                <Slider
+                  id="continue-writing-length"
+                  min={128}
+                  max={4096}
+                  step={128}
+                  value={continueWritingLength}
+                  onValueChange={
+                    handleResponseLengthChange
+                  }
+                  className="w-full cursor-pointer"
+                  aria-label="Continue AI response length"
+                />
+              </div>
+
+              <div className="relative mt-3 h-4 text-xs text-muted-foreground">
+                <span className="absolute left-0">
+                  128
+                </span>
+
+                <span
+                  className="absolute -translate-x-1/2"
+                  style={{ left: "23%" }}
+                >
+                  1,024
+                </span>
+
+                <span
+                  className="absolute -translate-x-1/2"
+                  style={{ left: "48.4%" }}
+                >
+                  2,048
+                </span>
+
+                <span className="absolute right-0">
+                  4,096
+                </span>
+              </div>
+            </div>
+          </section>
+
+          {/* Scene-specific context */}
+          <section>
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold">
+                Scene-Specific Instructions
+              </h2>
+
+              <p className="text-sm text-muted-foreground">
+                Additional instructions that should only apply to this scene.
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-card p-5">
+              <Label
+                htmlFor="scene-ai-context"
+                className="text-sm font-medium"
+              >
+                Additional context
+              </Label>
+
+              <Textarea
+                id="scene-ai-context"
+                value={sceneAIContext}
+                onChange={(event) =>
+                  handleSceneContextChange(
+                    event.target.value,
+                  )
+                }
+                placeholder="For example: Keep the conversation tense. The character is hiding what really happened last night..."
+                className="mt-3 min-h-[140px] resize-y"
+              />
+
+              <p className="mt-2 text-xs text-muted-foreground">
+                This context is saved automatically for this scene and will be included in AI requests.
+              </p>
+            </div>
+          </section>
+
           {/* Context summary */}
           <section>
             <div className="mb-4">
@@ -124,25 +324,33 @@ export function AIContextPanel({
               <ContextStat
                 icon={Users}
                 label="Characters"
-                value={formatted.characterCount}
+                value={
+                  formatted.characterCount
+                }
               />
 
               <ContextStat
                 icon={MapPin}
                 label="Locations"
-                value={formatted.locationCount}
+                value={
+                  formatted.locationCount
+                }
               />
 
               <ContextStat
                 icon={Link2}
                 label="Relationships"
-                value={formatted.relationshipCount}
+                value={
+                  formatted.relationshipCount
+                }
               />
 
               <ContextStat
                 icon={MessageSquare}
                 label="Estimated Tokens"
-                value={formatted.estimatedTokens}
+                value={
+                  formatted.estimatedTokens
+                }
               />
             </div>
           </section>
@@ -250,8 +458,7 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  This is the exact text currently produced by the
-                  context formatter.
+                  This is the exact text currently produced by the context formatter.
                 </p>
               </div>
 
