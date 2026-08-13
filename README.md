@@ -14,16 +14,6 @@ It combines a manuscript editor, project and scene management, worldbuilding, an
 * ⚙️ **Local AI** — Configure a local AI endpoint, model, and API key.
 * 💾 **Persistence** — Projects and manuscript state are saved locally.
 
-## 🧰 Tech Stack
-
-* React
-* TypeScript
-* Tiptap
-* Tailwind CSS
-* Lucide React
-* Local browser storage
-* Local AI endpoints
-
 ## 🚀 Getting Started
 
 ### Requirements
@@ -35,7 +25,7 @@ It combines a manuscript editor, project and scene management, worldbuilding, an
 ### Installation
 
 ```bash
-git clone https://codeberg.org/yixleex/mnemeona
+git clone https://github.com/yixleex/mnemeona.git
 cd mnemeona
 npm install
 npm run dev
