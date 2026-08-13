@@ -20,6 +20,7 @@ import * as projectActions from "./project/projectActions"
 import * as manuscriptActions from "./manuscript/manuscriptActions"
 import * as characterActions from "./character/characterActions"
 import * as locationActions from "./world/location/locationActions"
+import * as eventActions from "./world/event/eventActions"
 
 import type { MnemeonaProject } from "@/types/project"
 
@@ -27,6 +28,7 @@ import type { ProjectContextValue } from "./ProjectContext.types"
 
 import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
+import type { WorldEvent } from "@/types/world/event"
 import { createProject } from "@/lib/project"
 
 import { generateStorySummary } from "@/components/ai/aiservice/aiService"
@@ -784,6 +786,48 @@ export function ProjectProvider({
   )
 
   // --------------------------------------------------
+  // Events
+  // --------------------------------------------------
+
+  const addEvent = useCallback(
+    (
+      event: Omit<
+        WorldEvent,
+        "id" | "createdAt" | "updatedAt"
+      >,
+    ) =>
+      eventActions.addEvent(
+        setProject,
+        event,
+      ),
+    [],
+  )
+
+  const updateEvent = useCallback(
+    (
+      eventId: string,
+      updates: Partial<WorldEvent>,
+    ) =>
+      eventActions.updateEvent(
+        setProject,
+        eventId,
+        updates,
+      ),
+    [],
+  )
+
+  const deleteEvent = useCallback(
+    (
+      eventId: string,
+    ) =>
+      eventActions.deleteEvent(
+        setProject,
+        eventId,
+      ),
+    [],
+  )
+
+  // --------------------------------------------------
   // Context value
   // --------------------------------------------------
 
@@ -841,6 +885,11 @@ export function ProjectProvider({
       addLocation,
       updateLocation,
       deleteLocation,
+
+      // Events
+      addEvent,
+      updateEvent,
+      deleteEvent,
     }),
     [
       project,

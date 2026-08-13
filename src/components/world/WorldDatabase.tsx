@@ -18,9 +18,9 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-
 import { useProject } from "@/context/ProjectContext"
 
+import { EventDatabase } from "./events/EventDatabase"
 import { LocationDatabase } from "./locations/LocationDatabase"
 
 interface WorldDatabaseProps {
@@ -107,9 +107,7 @@ const WORLD_CATEGORIES: WorldCategory[] = [
 export function WorldDatabase({
   onClose,
 }: WorldDatabaseProps) {
-  const {
-    project,
-  } = useProject()
+  const { project } = useProject()
 
   const [activeView, setActiveView] =
     useState<WorldView>("overview")
@@ -124,11 +122,14 @@ export function WorldDatabase({
   const locationCount =
     project.locations?.length ?? 0
 
+  const eventCount =
+    project.events?.length ?? 0
+
   const categoryCounts =
     useMemo(
       () => ({
         locations: locationCount,
-        events: 0,
+        events: eventCount,
         factions: 0,
         artifacts: 0,
         lore: 0,
@@ -136,7 +137,10 @@ export function WorldDatabase({
         creatures: 0,
         systems: 0,
       }),
-      [locationCount],
+      [
+        locationCount,
+        eventCount,
+      ],
     )
 
   const filteredCategories =
@@ -171,32 +175,47 @@ export function WorldDatabase({
       0,
     )
 
-  /*
-   * ---------------------------------------------------------
-   * LOCATION VIEW
-   * ---------------------------------------------------------
-   */
+  // --------------------------------------------------
+  // Location View
+  // --------------------------------------------------
 
   if (
-    activeView === "locations"
+    activeView ===
+    "locations"
   ) {
     return (
       <LocationDatabase
         onClose={() =>
-          setActiveView("overview")
+          setActiveView(
+            "overview",
+          )
         }
       />
     )
   }
 
-  /*
-   * ---------------------------------------------------------
-   * FUTURE WORLD VIEWS
-   * ---------------------------------------------------------
-   *
-   * Events, Factions, Artifacts, Lore, etc.
-   * will eventually be rendered here.
-   */
+  // --------------------------------------------------
+  // Event View
+  // --------------------------------------------------
+
+  if (
+    activeView ===
+    "events"
+  ) {
+    return (
+      <EventDatabase
+        onClose={() =>
+          setActiveView(
+            "overview",
+          )
+        }
+      />
+    )
+  }
+
+  // --------------------------------------------------
+  // World Overview
+  // --------------------------------------------------
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -286,7 +305,11 @@ export function WorldDatabase({
 
               <Button
                 variant="outline"
-                disabled
+                onClick={() =>
+                  setActiveView(
+                    "events",
+                  )
+                }
               >
                 <Plus className="mr-2 h-4 w-4" />
                 New Event
@@ -347,7 +370,9 @@ export function WorldDatabase({
 
                     const isAvailable =
                       category.id ===
-                      "locations"
+                        "locations" ||
+                      category.id ===
+                        "events"
 
                     const count =
                       categoryCounts[
@@ -370,6 +395,15 @@ export function WorldDatabase({
                           ) {
                             setActiveView(
                               "locations",
+                            )
+                          }
+
+                          if (
+                            category.id ===
+                            "events"
+                          ) {
+                            setActiveView(
+                              "events",
                             )
                           }
                         }}
@@ -439,42 +473,13 @@ export function WorldDatabase({
                     World Database can become
                     structured context for the AI.
                     Locations, events, factions,
-                    artifacts, lore, and other
-                    world elements will eventually
-                    be connected so the AI can
-                    understand how your world fits
-                    together.
+                    artifacts, lore, cultures,
+                    creatures, and systems can
+                    eventually help the AI maintain
+                    consistency throughout your story.
                   </p>
                 </div>
               </div>
-            </div>
-          </section>
-
-          {/* Recently Updated */}
-
-          <section className="pb-8">
-            <div className="mb-4">
-              <h2 className="text-sm font-semibold">
-                Recently Updated
-              </h2>
-
-              <p className="text-sm text-muted-foreground">
-                World elements you've recently
-                changed will appear here.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-dashed p-8 text-center">
-              <Globe2 className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
-
-              <p className="text-sm font-medium">
-                Your world is ready to be built.
-              </p>
-
-              <p className="mt-1 text-sm text-muted-foreground">
-                Create your first location,
-                event, faction, or piece of lore.
-              </p>
             </div>
           </section>
         </div>

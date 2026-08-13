@@ -4,6 +4,7 @@ import type { MnemeonaProject } from "@/types/project"
 import type { Scene } from "@/types/manuscript"
 import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
+import type { WorldEvent } from "@/types/world/event"
 
 export interface ProjectContextValue {
   project: MnemeonaProject
@@ -194,5 +195,25 @@ export interface ProjectContextValue {
 
   deleteLocation: (
     locationId: string,
+  ) => void
+
+  // --------------------------------------------------
+  // Events
+  // --------------------------------------------------
+
+  addEvent: (
+    event: Omit<
+      WorldEvent,
+      "id" | "createdAt" | "updatedAt"
+    >,
+  ) => string
+
+  updateEvent: (
+    eventId: string,
+    updates: Partial<WorldEvent>,
+  ) => void
+
+  deleteEvent: (
+    eventId: string,
   ) => void
 }
