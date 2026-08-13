@@ -1,7 +1,6 @@
 import {
   buildSystemPrompt,
   loadAIConfig,
-  loadSceneAIContext,
 } from "./aiService"
 
 import type { MnemeonaProject } from "@/types/project"
@@ -13,32 +12,54 @@ export interface AITokenCount {
   promptTokens: number
   responseTokens: number
   totalTokens: number
-  contextLength: number | null
-  percentage: number | null
-  source: "tokenizer" | "estimate"
+
+  contextLength:
+    | number
+    | null
+
+  percentage:
+    | number
+    | null
+
+  source:
+    | "model"
+    | "estimate"
+
   tokenizerAvailable: boolean
-  tokenizerError: string | null
+
+  tokenizerError:
+    | string
+    | null
 }
 
-interface OllamaTokenizeResponse {
-  tokens?: unknown
-  token_count?: unknown
+interface OllamaChatResponse {
+  prompt_eval_count?: unknown
+
+  eval_count?: unknown
+
+  done?: boolean
+
+  error?: string
+
+  message?: {
+    role?: string
+    content?: string
+  }
 }
 
 interface OllamaShowResponse {
   parameters?: string
-  model_info?: Record<string, unknown>
+
+  model_info?: Record<
+    string,
+    unknown
+  >
 }
 
-/**
- * Normalizes the configured Ollama endpoint.
- *
- * Supports:
- *   http://localhost:11434
- *   http://localhost:11434/
- *   http://localhost:11434/api
- *   http://localhost:11434/api/
- */
+// --------------------------------------------------
+// Ollama URL
+// --------------------------------------------------
+
 function getOllamaBaseUrl(
   endpoint: string,
 ): string {
@@ -49,13 +70,10 @@ function getOllamaBaseUrl(
     .replace(/\/+$/, "")
 }
 
-/**
- * Extract the actual prose from the current scene.
- *
- * The scene is deliberately NOT added to buildSceneContext().
- * It is only included in the token calculation because the
- * actual scene text is sent to the model separately.
- */
+// --------------------------------------------------
+// Scene Text
+// --------------------------------------------------
+
 function extractSceneText(
   scene: ProjectScene,
 ): string {
@@ -103,7 +121,9 @@ function extractSceneText(
           extractNode(child)
 
         if (childText) {
-          parts.push(childText)
+          parts.push(
+            childText,
+          )
         }
       }
     }
@@ -111,26 +131,37 @@ function extractSceneText(
     return parts.join(" ")
   }
 
-  return extractNode(content).trim()
+  return extractNode(
+    content,
+  ).trim()
+}
+
+// --------------------------------------------------
+// Prompt Messages
+// --------------------------------------------------
+
+interface TokenMessage {
+  role:
+    | "system"
+    | "user"
+    | "assistant"
+
+  content: string
 }
 
 /**
- * Build the same conceptual input that is sent to the AI.
+ * Builds the messages that represent the prompt being
+ * measured.
  *
- * The current scene is included here for token counting but
- * remains absent from the visible Formatted AI Context panel.
+ * The scene text is included for token accounting, but
+ * is intentionally NOT shown in the Formatted AI Context
+ * section of the UI.
  */
-function buildTokenizerInput(
+function buildTokenMessages(
   project: MnemeonaProject,
   activeScene: ProjectScene,
-  messages: {
-    role:
-      | "system"
-      | "user"
-      | "assistant"
-    content: string
-  }[],
-): string {
+  messages: TokenMessage[],
+): TokenMessage[] {
   const systemPrompt =
     buildSystemPrompt(
       project,
@@ -142,59 +173,143 @@ function buildTokenizerInput(
       activeScene,
     )
 
-  const additionalContext =
-    loadSceneAIContext(
-      activeScene.id,
-    ).trim()
-
-  const messageText =
-    messages
-      .map(
-        (message) =>
-          `${message.role.toUpperCase()}:\n${message.content}`,
-      )
-      .join("\n\n")
-
   return [
-    "SYSTEM:",
-    systemPrompt,
+    {
+      role: "system",
+      content:
+        systemPrompt,
+    },
 
-    sceneText
-      ? `CURRENT SCENE TEXT:\n${sceneText}`
-      : "",
+    ...(sceneText
+      ? [
+          {
+            role: "user" as const,
+            content:
+              `CURRENT SCENE TEXT:\n\n${sceneText}`,
+          },
+        ]
+      : []),
 
-    /*
-     * Normally Additional Context is already represented
-     * by buildSystemPrompt(). Only add it independently
-     * if it isn't already there.
-     */
-    additionalContext &&
-    !systemPrompt.includes(
-      additionalContext,
-    )
-      ? `SCENE-SPECIFIC CONTEXT:\n${additionalContext}`
-      : "",
-
-    messageText,
+    ...messages,
   ]
-    .filter(Boolean)
-    .join("\n\n")
+}
+
+// --------------------------------------------------
+// Fallback Estimation
+// --------------------------------------------------
+
+/**
+ * Deliberately approximate.
+ *
+ * This is only used while waiting for Ollama's actual
+ * model-side token count or if the model cannot provide one.
+ */
+export function estimateTokens(
+  text: string,
+): number {
+  if (!text.trim()) {
+    return 0
+  }
+
+  return Math.ceil(
+    text.length / 4,
+  )
 }
 
 /**
- * Tokenize text using the selected Ollama model.
+ * Creates the approximate result immediately.
  *
- * Returns both the count and an error so the UI can tell
- * the difference between:
- *
- *   - tokenizer unavailable
- *   - invalid endpoint
- *   - model not found
- *   - server error
- *   - malformed response
+ * This allows the UI to show useful information while
+ * Ollama is still processing the real token count.
  */
-async function tokenizeWithOllama(
-  text: string,
+export function createApproximateAIRequestTokens(
+  project: MnemeonaProject,
+  activeScene: ProjectScene,
+  responseTokens: number,
+  messages: TokenMessage[] = [],
+  contextLength: number | null = null,
+): AITokenCount {
+  const tokenMessages =
+    buildTokenMessages(
+      project,
+      activeScene,
+      messages,
+    )
+
+  const promptText =
+    tokenMessages
+      .map(
+        (message) =>
+          `${message.role}\n${message.content}`,
+      )
+      .join("\n\n")
+
+  const promptTokens =
+    estimateTokens(
+      promptText,
+    )
+
+  const normalizedResponseTokens =
+    Math.max(
+      0,
+      Math.floor(
+        responseTokens,
+      ),
+    )
+
+  const totalTokens =
+    promptTokens +
+    normalizedResponseTokens
+
+  const percentage =
+    contextLength &&
+    contextLength > 0
+      ? Math.min(
+          100,
+          (totalTokens /
+            contextLength) *
+            100,
+        )
+      : null
+
+  return {
+    promptTokens,
+
+    responseTokens:
+      normalizedResponseTokens,
+
+    totalTokens,
+
+    contextLength,
+
+    percentage,
+
+    source:
+      "estimate",
+
+    tokenizerAvailable:
+      false,
+
+    tokenizerError:
+      "Waiting for Ollama to provide the actual model token count.",
+  }
+}
+
+// --------------------------------------------------
+// Model Token Count
+// --------------------------------------------------
+
+/**
+ * Ask Ollama to evaluate the exact prompt through /api/chat.
+ *
+ * We intentionally do NOT use /api/tokenize because the user's
+ * Ollama installation does not expose that endpoint.
+ *
+ * num_predict: 0 prevents generation while allowing Ollama
+ * to evaluate the prompt and return prompt_eval_count.
+ */
+async function countPromptTokensWithModel(
+  messages: TokenMessage[],
   signal?: AbortSignal,
 ): Promise<{
   count: number | null
@@ -223,47 +338,46 @@ async function tokenizeWithOllama(
     }
   }
 
-  if (!text.trim()) {
-    return {
-      count: 0,
-      error: null,
-    }
-  }
-
   const baseUrl =
     getOllamaBaseUrl(
       config.endpoint,
     )
 
-  const url =
-    `${baseUrl}/api/tokenize`
-
   try {
     const response =
-      await fetch(url, {
-        method: "POST",
+      await fetch(
+        `${baseUrl}/api/chat`,
+        {
+          method: "POST",
 
-        headers: {
-          "Content-Type":
-            "application/json",
+          headers: {
+            "Content-Type":
+              "application/json",
 
-          ...(config.apiKey
-            ? {
-                Authorization:
-                  `Bearer ${config.apiKey}`,
-              }
-            : {}),
+            ...(config.apiKey
+              ? {
+                  Authorization:
+                    `Bearer ${config.apiKey}`,
+                }
+              : {}),
+          },
+
+          body: JSON.stringify({
+            model:
+              config.model,
+
+            messages,
+
+            stream: false,
+
+            options: {
+              num_predict: 0,
+            },
+          }),
+
+          signal,
         },
-
-        body: JSON.stringify({
-          model:
-            config.model,
-          content:
-            text,
-        }),
-
-        signal,
-      })
+      )
 
     const rawBody =
       await response.text()
@@ -286,83 +400,83 @@ async function tokenizeWithOllama(
             parsed.error
         }
       } catch {
-        // Keep the raw response.
-      }
-
-      if (!detail) {
-        detail =
-          response.statusText ||
-          "Unknown Ollama error."
+        // Keep raw response.
       }
 
       return {
         count: null,
+
         error:
-          `Ollama tokenizer returned HTTP ${response.status}: ${detail}`,
+          `Ollama prompt evaluation returned HTTP ${response.status}: ${
+            detail ||
+            response.statusText ||
+            "Unknown error."
+          }`,
       }
     }
 
     let data:
-      | OllamaTokenizeResponse
+      | OllamaChatResponse
 
     try {
       data =
         JSON.parse(
           rawBody,
-        ) as OllamaTokenizeResponse
+        ) as OllamaChatResponse
     } catch {
       return {
         count: null,
+
         error:
-          "Ollama tokenizer returned invalid JSON.",
+          "Ollama returned invalid JSON while measuring the prompt.",
       }
     }
 
-    if (
-      Array.isArray(
-        data.tokens,
-      )
-    ) {
+    if (data.error) {
       return {
-        count:
-          data.tokens.length,
-        error: null,
+        count: null,
+
+        error:
+          `Ollama returned an error while measuring the prompt: ${data.error}`,
       }
     }
 
     if (
-      typeof data.token_count ===
+      typeof data.prompt_eval_count ===
         "number" &&
       Number.isFinite(
-        data.token_count,
+        data.prompt_eval_count,
       )
     ) {
       return {
         count: Math.max(
           0,
           Math.floor(
-            data.token_count,
+            data.prompt_eval_count,
           ),
         ),
+
         error: null,
       }
     }
 
     return {
       count: null,
+
       error:
-        "Ollama tokenizer response did not contain a token count.",
+        "Ollama did not return prompt_eval_count.",
     }
   } catch (error) {
     if (
       error instanceof
-      DOMException &&
+        DOMException &&
       error.name ===
         "AbortError"
     ) {
       return {
         count: null,
-        error: "Request cancelled.",
+        error:
+          "Request cancelled.",
       }
     }
 
@@ -371,40 +485,25 @@ async function tokenizeWithOllama(
     ) {
       return {
         count: null,
+
         error:
-          `Could not reach Ollama tokenizer: ${error.message}`,
+          `Could not reach Ollama: ${error.message}`,
       }
     }
 
     return {
       count: null,
+
       error:
-        "Could not reach the Ollama tokenizer.",
+        "Could not reach Ollama.",
     }
   }
 }
 
-/**
- * Fallback only.
- *
- * This is NOT model-accurate and should only be used when
- * /api/tokenize isn't available.
- */
-function estimateTokens(
-  text: string,
-): number {
-  if (!text.trim()) {
-    return 0
-  }
+// --------------------------------------------------
+// Model Context Window
+// --------------------------------------------------
 
-  return Math.ceil(
-    text.length / 4,
-  )
-}
-
-/**
- * Find the model's context window through /api/show.
- */
 export async function getModelContextLength(
   signal?: AbortSignal,
 ): Promise<number | null> {
@@ -445,8 +544,8 @@ export async function getModelContextLength(
           body: JSON.stringify({
             model:
               config.model,
-            verbose:
-              true,
+
+            verbose: true,
           }),
 
           signal,
@@ -460,10 +559,6 @@ export async function getModelContextLength(
     const data =
       (await response.json()) as OllamaShowResponse
 
-    /*
-     * If the model has an explicit num_ctx parameter,
-     * that is the effective context size configured for it.
-     */
     if (
       typeof data.parameters ===
       "string"
@@ -473,9 +568,11 @@ export async function getModelContextLength(
           /(?:^|\s)num_ctx\s+(\d+)/i,
         )
 
-      if (match) {
+      if (match?.[1]) {
         const value =
-          Number(match[1])
+          Number(
+            match[1],
+          )
 
         if (
           Number.isFinite(
@@ -513,13 +610,6 @@ export async function getModelContextLength(
       )
     }
 
-    /*
-     * Ollama commonly exposes architecture-prefixed
-     * fields such as:
-     *
-     *   qwen3.context_length
-     *   llama.context_length
-     */
     for (const [
       key,
       value,
@@ -551,54 +641,23 @@ export async function getModelContextLength(
   }
 }
 
-/**
- * Calculate the live token budget.
- *
- * promptTokens:
- *   Actual model tokenizer count when available.
- *
- * responseTokens:
- *   Current Continue AI slider value.
- *
- * totalTokens:
- *   Prompt + reserved response.
- */
+// --------------------------------------------------
+// Complete Token Calculation
+// --------------------------------------------------
+
 export async function estimateAIRequestTokens(
   project: MnemeonaProject,
   activeScene: ProjectScene,
   responseTokens: number,
-  messages: {
-    role:
-      | "system"
-      | "user"
-      | "assistant"
-    content: string
-  }[] = [],
+  messages: TokenMessage[] = [],
   signal?: AbortSignal,
 ): Promise<AITokenCount> {
-  const tokenizerInput =
-    buildTokenizerInput(
+  const tokenMessages =
+    buildTokenMessages(
       project,
       activeScene,
       messages,
     )
-
-  const tokenizerResult =
-    await tokenizeWithOllama(
-      tokenizerInput,
-      signal,
-    )
-
-  const tokenizerAvailable =
-    tokenizerResult.count !==
-    null
-
-  const promptTokens =
-    tokenizerAvailable
-      ? tokenizerResult.count!
-      : estimateTokens(
-          tokenizerInput,
-        )
 
   const normalizedResponseTokens =
     Math.max(
@@ -608,46 +667,138 @@ export async function estimateAIRequestTokens(
       ),
     )
 
-  const totalTokens =
-    promptTokens +
+  /*
+   * Calculate the fallback immediately.
+   */
+  const promptText =
+    tokenMessages
+      .map(
+        (message) =>
+          `${message.role}\n${message.content}`,
+      )
+      .join("\n\n")
+
+  const approximatePromptTokens =
+    estimateTokens(
+      promptText,
+    )
+
+  const approximateTotalTokens =
+    approximatePromptTokens +
     normalizedResponseTokens
 
+  /*
+   * Fetch the model context size independently.
+   */
   const contextLength =
     await getModelContextLength(
       signal,
     )
 
-  const percentage =
+  /*
+   * Ask the actual model for its prompt token count.
+   */
+  const modelResult =
+    await countPromptTokensWithModel(
+      tokenMessages,
+      signal,
+    )
+
+  /*
+   * Ollama successfully gave us the actual count.
+   */
+  if (
+    modelResult.count !==
+    null
+  ) {
+    const promptTokens =
+      modelResult.count
+
+    const totalTokens =
+      promptTokens +
+      normalizedResponseTokens
+
+    const percentage =
+      contextLength &&
+      contextLength > 0
+        ? Math.min(
+            100,
+            (totalTokens /
+              contextLength) *
+              100,
+          )
+        : null
+
+    return {
+      promptTokens,
+
+      responseTokens:
+        normalizedResponseTokens,
+
+      totalTokens,
+
+      contextLength,
+
+      percentage,
+
+      source:
+        "model",
+
+      tokenizerAvailable:
+        true,
+
+      tokenizerError:
+        null,
+    }
+  }
+
+  /*
+   * Ollama failed to provide the actual count.
+   *
+   * Return the approximate number instead of hiding
+   * the gauge.
+   */
+  const approximatePercentage =
     contextLength &&
     contextLength > 0
       ? Math.min(
           100,
-          (totalTokens /
+          (approximateTotalTokens /
             contextLength) *
             100,
         )
       : null
 
   return {
-    promptTokens,
+    promptTokens:
+      approximatePromptTokens,
+
     responseTokens:
       normalizedResponseTokens,
-    totalTokens,
+
+    totalTokens:
+      approximateTotalTokens,
+
     contextLength,
-    percentage,
+
+    percentage:
+      approximatePercentage,
+
     source:
-      tokenizerAvailable
-        ? "tokenizer"
-        : "estimate",
-    tokenizerAvailable,
+      "estimate",
+
+    tokenizerAvailable:
+      false,
+
     tokenizerError:
-      tokenizerResult.error,
+      modelResult.error,
   }
 }
 
-/**
- * Format a token count for display.
- */
+// --------------------------------------------------
+// Formatting
+// --------------------------------------------------
+
 export function formatTokenCount(
   value: number,
 ): string {
