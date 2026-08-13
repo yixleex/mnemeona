@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useCallback,
   type ReactNode,
@@ -15,7 +16,6 @@ import {
   calculateSceneWordCount,
   findScene,
 } from "./project/projectHelpers"
-
 import * as projectActions from "./project/projectActions"
 import * as manuscriptActions from "./manuscript/manuscriptActions"
 import * as characterActions from "./character/characterActions"
@@ -27,7 +27,6 @@ import type { ProjectContextValue } from "./ProjectContext.types"
 
 import type { Character } from "@/types/character"
 import type { Location } from "@/types/location"
-
 import { createProject } from "@/lib/project"
 
 import { generateStorySummary } from "@/components/ai/aiservice/aiService"
@@ -41,56 +40,29 @@ const ProjectContext =
 
 /**
  * Creates a deterministic representation of the
- * scenes that belong to the story summary.
+ * text/content of every scene in the manuscript.
  *
- * The summary represents everything BEFORE the
- * currently selected scene.
+ * The story summary should only become stale when
+ * actual scene text changes.
  *
- * If none of those scenes changed, the summary
- * does not need to be regenerated.
+ * Scene selection, scrolling, titles, synopsis,
+ * POV, location, time, etc. do not affect this.
  */
 function buildStorySummaryFingerprint(
   project: MnemeonaProject,
-  activeSceneId: string | null,
 ): string {
-  if (!activeSceneId) {
-    return ""
-  }
-
   const parts: string[] = []
-
-  let reachedActiveScene = false
 
   for (const act of project.manuscript.acts) {
     for (const chapter of act.chapters) {
       for (const scene of chapter.scenes) {
-        if (scene.id === activeSceneId) {
-          reachedActiveScene = true
-          break
-        }
-
         parts.push(
           JSON.stringify({
-            actId: act.id,
-            chapterId: chapter.id,
             sceneId: scene.id,
-            title: scene.title,
-            synopsis: scene.synopsis,
-            pov: scene.pov,
-            location: scene.location,
-            time: scene.time,
             content: scene.content,
           }),
         )
       }
-
-      if (reachedActiveScene) {
-        break
-      }
-    }
-
-    if (reachedActiveScene) {
-      break
     }
   }
 
@@ -98,8 +70,8 @@ function buildStorySummaryFingerprint(
    * This is intentionally simple and deterministic.
    *
    * We do not need cryptographic security here.
-   * We only need to know whether the manuscript
-   * represented by the previous summary changed.
+   * We only need to know whether the scene text
+   * has changed.
    */
   return parts.join("\n")
 }
@@ -118,6 +90,22 @@ export function ProjectProvider({
 
   const [summaryGenerating, setSummaryGenerating] =
     useState(false)
+
+  /*
+   * Stores the scene-text state from the previous
+   * render so we can distinguish actual scene edits
+   * from navigation and unrelated project changes.
+   */
+  const sceneTextFingerprintRef =
+    useRef<string | null>(null)
+
+  /*
+   * Becomes true whenever scene text changes and
+   * remains true until a summary is successfully
+   * generated.
+   */
+  const scenesChangedSinceSummaryRef =
+    useRef(false)
 
   // --------------------------------------------------
   // Active scene
@@ -172,25 +160,29 @@ export function ProjectProvider({
       }
 
       /*
-       * Calculate the current state of all scenes
-       * represented by the summary.
+       * The fingerprint represents the text/content
+       * of every scene in the manuscript.
        */
       const currentFingerprint =
         buildStorySummaryFingerprint(
           targetProject,
-          sceneId,
         )
 
       /*
-       * If we already have a summary generated from
-       * exactly this manuscript state, there is
-       * nothing to do.
+       * If the summary already represents this exact
+       * scene-text state, there is nothing to do.
+       *
+       * This also protects against accidental duplicate
+       * requests.
        */
       if (
         targetProject.storySummary?.trim() &&
         targetProject.storySummaryFingerprint ===
           currentFingerprint
       ) {
+        scenesChangedSinceSummaryRef.current =
+          false
+
         return
       }
 
@@ -215,7 +207,18 @@ export function ProjectProvider({
           updatedAt:
             new Date().toISOString(),
         }))
+
+        /*
+         * The summary now represents the latest
+         * scene-text state.
+         */
+        scenesChangedSinceSummaryRef.current =
+          false
       } catch (error) {
+        /*
+         * Keep the dirty flag set when generation fails.
+         * The next scene change/save can retry.
+         */
         console.error(
           "Failed to generate story summary:",
           error,
@@ -272,12 +275,12 @@ export function ProjectProvider({
           const fingerprint =
             buildStorySummaryFingerprint(
               project,
-              sceneId,
             )
 
           /*
-           * Only ask the AI to regenerate the summary
-           * when the scenes represented by it changed.
+           * Only consider the summary stale when the
+           * actual scene text differs from the text that
+           * was used to create the summary.
            */
           const summaryIsCurrent =
             Boolean(
@@ -307,6 +310,9 @@ export function ProjectProvider({
                 }
 
                 setProject(projectToSave)
+
+                scenesChangedSinceSummaryRef.current =
+                  false
               }
             } catch (error) {
               console.error(
@@ -542,6 +548,64 @@ export function ProjectProvider({
   )
 
   // --------------------------------------------------
+  // Detect actual scene-text changes
+  // --------------------------------------------------
+
+  useEffect(() => {
+    const currentFingerprint =
+      buildStorySummaryFingerprint(
+        project,
+      )
+
+    /*
+     * First render/project load:
+     *
+     * Establish the baseline without marking the
+     * project as edited.
+     *
+     * This prevents simply opening a project from
+     * triggering a summary update.
+     */
+    if (
+      sceneTextFingerprintRef.current === null
+    ) {
+      sceneTextFingerprintRef.current =
+        currentFingerprint
+
+      return
+    }
+
+    /*
+     * Nothing about the scene text changed.
+     *
+     * This includes:
+     * - changing active scene
+     * - scrolling
+     * - changing project metadata
+     * - changing character/location data
+     * - other unrelated project updates
+     */
+    if (
+      sceneTextFingerprintRef.current ===
+      currentFingerprint
+    ) {
+      return
+    }
+
+    /*
+     * At least one scene's text/content changed.
+     *
+     * Keep this flag set until the summary is
+     * successfully regenerated.
+     */
+    sceneTextFingerprintRef.current =
+      currentFingerprint
+
+    scenesChangedSinceSummaryRef.current =
+      true
+  }, [project])
+
+  // --------------------------------------------------
   // Automatically update summary when scene changes
   // --------------------------------------------------
 
@@ -550,14 +614,25 @@ export function ProjectProvider({
       return
     }
 
+    /*
+     * Changing scenes is only a trigger opportunity.
+     *
+     * If no scene text has changed since the previous
+     * summary, do absolutely nothing.
+     */
+    if (
+      !scenesChangedSinceSummaryRef.current
+    ) {
+      return
+    }
+
     void updateStorySummary(project)
 
-    // We intentionally only trigger when the
-    // selected scene changes.
+    // Intentionally trigger only when the selected
+    // scene changes.
     //
-    // The fingerprint check inside updateStorySummary
-    // determines whether an AI request is actually
-    // necessary.
+    // The scene-text detection effect above is
+    // responsible for setting the pending flag.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSceneId])
 
@@ -724,7 +799,6 @@ export function ProjectProvider({
 
       summaryGenerating,
       updateStorySummary,
-
       setActiveScene,
 
       createNewProject,
@@ -780,7 +854,6 @@ export function ProjectProvider({
       updateStorySummary,
 
       setActiveScene,
-
       createNewProject,
       loadProject,
       saveProject,
