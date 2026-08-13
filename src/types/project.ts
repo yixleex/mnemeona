@@ -1,6 +1,7 @@
 import type { Manuscript } from "./manuscript"
 import type { Character } from "./character"
 import type { Location } from "./world/location"
+import type { WorldEvent } from "./world/event"
 
 export interface MnemeonaProject {
   id: string
@@ -14,7 +15,10 @@ export interface MnemeonaProject {
   manuscript: Manuscript
 
   characters: Character[]
+
+  // World
   locations: Location[]
+  events: WorldEvent[]
 
   notes: unknown[]
 

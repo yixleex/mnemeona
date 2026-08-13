@@ -95,7 +95,11 @@ export function createProject(
     manuscript,
 
     characters: [],
+
+    // world
     locations: [],
+    events: [],
+
     notes: [],
 
     storySummary: "",
