@@ -3,7 +3,7 @@ import type { JSONContent } from "@tiptap/react"
 import type { MnemeonaProject } from "@/types/project"
 import type { Scene } from "@/types/manuscript"
 import type { Character } from "@/types/character"
-import type { Location } from "@/types/location"
+import type { Location } from "@/types/world/location"
 
 export interface ProjectContextValue {
   project: MnemeonaProject

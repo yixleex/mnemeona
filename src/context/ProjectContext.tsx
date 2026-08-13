@@ -26,7 +26,7 @@ import type { MnemeonaProject } from "@/types/project"
 import type { ProjectContextValue } from "./ProjectContext.types"
 
 import type { Character } from "@/types/character"
-import type { Location } from "@/types/location"
+import type { Location } from "@/types/world/location"
 import { createProject } from "@/lib/project"
 
 import { generateStorySummary } from "@/components/ai/aiservice/aiService"

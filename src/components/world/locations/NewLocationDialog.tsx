@@ -24,7 +24,7 @@ import { Textarea } from "@/components/ui/textarea"
 import type {
   Location,
   LocationType,
-} from "@/types/location"
+} from "@/types/world/location"
 
 interface NewLocationDialogProps {
   open: boolean

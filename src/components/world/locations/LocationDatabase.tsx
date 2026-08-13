@@ -23,7 +23,7 @@ import { useProject } from "@/context/ProjectContext"
 import type {
   Location,
   LocationType,
-} from "@/types/location"
+} from "@/types/world/location"
 
 import {
   NewLocationDialog,

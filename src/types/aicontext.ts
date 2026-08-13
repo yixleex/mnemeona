@@ -1,6 +1,6 @@
 import type { Scene } from "./manuscript"
 import type { Character } from "./character"
-import type { Location } from "./location"
+import type { Location } from "./world/location"
 
 // --------------------------------------------------
 // Character Mentions

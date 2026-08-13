@@ -1,5 +1,5 @@
 import type { Scene } from "@/types/manuscript"
-import type { Location } from "@/types/location"
+import type { Location } from "@/types/world/location"
 
 import { detectLocationMentions } from "./detectLocationMentions"
 

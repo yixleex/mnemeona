@@ -1,4 +1,4 @@
-import type { Location } from "@/types/location"
+import type { Location } from "@/types/world/location"
 import type { Scene } from "@/types/manuscript"
 import type { JSONContent } from "@tiptap/core"
 

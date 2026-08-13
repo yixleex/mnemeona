@@ -4,7 +4,7 @@ import type {
 } from "react"
 
 import type { MnemeonaProject } from "@/types/project"
-import type { Location } from "@/types/location"
+import type { Location } from "@/types/world/location"
 
 import { createId } from "@/lib/project"
 

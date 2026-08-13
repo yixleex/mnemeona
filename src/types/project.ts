@@ -1,6 +1,6 @@
 import type { Manuscript } from "./manuscript"
 import type { Character } from "./character"
-import type { Location } from "./location"
+import type { Location } from "./world/location"
 
 export interface MnemeonaProject {
   id: string
