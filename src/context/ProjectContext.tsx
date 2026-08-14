@@ -1,11 +1,11 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
-  useState,
-  useCallback,
   useRef,
+  useState,
   type ReactNode,
 } from "react"
 
@@ -16,15 +16,15 @@ import {
   calculateSceneWordCount,
   findScene,
 } from "./project/projectHelpers"
+
 import * as projectActions from "./project/projectActions"
 import * as manuscriptActions from "./manuscript/manuscriptActions"
 import * as characterActions from "./character/characterActions"
 import * as locationActions from "./world/location/locationActions"
 import * as eventActions from "./world/event/eventActions"
 
-import type { MnemeonaProject } from "@/types/project"
-
 import type { ProjectContextValue } from "./ProjectContext.types"
+import type { MnemeonaProject } from "@/types/project"
 import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
 import type { WorldEvent } from "@/types/world/event"
@@ -37,41 +37,58 @@ const ProjectContext =
   createContext<ProjectContextValue | null>(null)
 
 // --------------------------------------------------
-// Project Normalization
+// Project normalization
 // --------------------------------------------------
 
-/**
- * Ensures projects created before newer World Database
- * collections were introduced remain compatible.
- */
 function normalizeProject(
   project: MnemeonaProject,
 ): MnemeonaProject {
   return {
     ...project,
-    locations: project.locations ?? [],
-    events: project.events ?? [],
-    characters: project.characters ?? [],
-    notes: project.notes ?? [],
-    storySummary: project.storySummary ?? "",
+
+    characters:
+      project.characters ?? [],
+
+    locations:
+      project.locations ?? [],
+
+    events:
+      project.events ?? [],
+
+    notes:
+      project.notes ?? [],
+
+    storySummary:
+      project.storySummary ?? "",
+
     storySummaryFingerprint:
       project.storySummaryFingerprint ?? "",
   }
 }
 
 // --------------------------------------------------
-// Summary Fingerprint
+// Story summary fingerprint
 // --------------------------------------------------
 
 /**
- * Creates a deterministic representation of the
- * scenes that belong to the story summary.
+ * Creates a deterministic representation of every
+ * scene BEFORE the currently active scene.
  *
- * The summary represents everything BEFORE the
- * currently selected scene.
+ * The active scene itself is deliberately excluded.
  *
- * If none of those scenes changed, the summary
- * does not need to be regenerated.
+ * This means:
+ *
+ * Scene 1 -> Scene 2
+ *   => summarize Scene 1
+ *
+ * Edit Scene 1 -> Scene 2
+ *   => summarize again
+ *
+ * Edit Scene 2 while staying in Scene 2
+ *   => do NOT summarize Scene 2 itself
+ *
+ * Enter Scene 3
+ *   => Scene 1 + Scene 2 are now included
  */
 function buildStorySummaryFingerprint(
   project: MnemeonaProject,
@@ -83,13 +100,13 @@ function buildStorySummaryFingerprint(
 
   const parts: string[] = []
 
-  let reachedActiveScene = false
+  let foundActiveScene = false
 
   for (const act of project.manuscript.acts) {
     for (const chapter of act.chapters) {
       for (const scene of chapter.scenes) {
         if (scene.id === activeSceneId) {
-          reachedActiveScene = true
+          foundActiveScene = true
           break
         }
 
@@ -98,22 +115,24 @@ function buildStorySummaryFingerprint(
             actId: act.id,
             chapterId: chapter.id,
             sceneId: scene.id,
+
             title: scene.title,
             synopsis: scene.synopsis,
             pov: scene.pov,
             location: scene.location,
             time: scene.time,
+
             content: scene.content,
           }),
         )
       }
 
-      if (reachedActiveScene) {
+      if (foundActiveScene) {
         break
       }
     }
 
-    if (reachedActiveScene) {
+    if (foundActiveScene) {
       break
     }
   }
@@ -132,21 +151,37 @@ export function ProjectProvider({
 }) {
   const [project, setProject] =
     useState<MnemeonaProject>(() =>
-      normalizeProject(createProject()),
+      normalizeProject(
+        createProject(),
+      ),
     )
 
   const [summaryGenerating, setSummaryGenerating] =
     useState(false)
 
   /**
-   * Prevents the automatic summary effect from
-   * running during the initial application mount.
+   * Prevents summary generation during the initial
+   * React mount.
    *
-   * The first scene is automatically selected when
-   * a project is created, but that does NOT mean the
-   * user has entered/navigated to a new scene.
+   * This is the important startup-crash protection.
+   *
+   * A newly-created project normally has an active
+   * first scene. We do NOT want that to immediately
+   * invoke the AI service while the application is
+   * booting.
    */
-  const hasMounted = useRef(false)
+  const hasMounted =
+    useRef(false)
+
+  /**
+   * Prevent multiple simultaneous summary requests.
+   *
+   * React can produce multiple state changes while the
+   * user is editing/navigating. We only want one AI
+   * summary request at a time.
+   */
+  const summaryRequestInProgress =
+    useRef(false)
 
   // --------------------------------------------------
   // Active scene
@@ -166,7 +201,9 @@ export function ProjectProvider({
   // --------------------------------------------------
 
   const activeSceneWordCount =
-    calculateSceneWordCount(activeScene)
+    calculateSceneWordCount(
+      activeScene,
+    )
 
   const projectWordCount =
     calculateProjectWordCount(
@@ -174,435 +211,177 @@ export function ProjectProvider({
     )
 
   // --------------------------------------------------
-  // Story Summary
+  // Story summary fingerprint
   // --------------------------------------------------
 
-  const updateStorySummary = useCallback(
-    async (
-      targetProject: MnemeonaProject = project,
-    ) => {
-      const normalizedProject =
-        normalizeProject(targetProject)
-
-      const sceneId =
-        normalizedProject.settings.activeSceneId
-
-      if (!sceneId) {
-        return
-      }
-
-      const targetScene =
-        findScene(
-          normalizedProject.manuscript.acts,
-          sceneId,
-        )
-
-      if (!targetScene) {
-        return
-      }
-
-      const currentFingerprint =
+  const storySummaryFingerprint =
+    useMemo(
+      () =>
         buildStorySummaryFingerprint(
-          normalizedProject,
-          sceneId,
-        )
+          project,
+          activeSceneId,
+        ),
+      [
+        project,
+        activeSceneId,
+      ],
+    )
 
-      /**
-       * If the summary already represents exactly
-       * this manuscript state, there is nothing to do.
-       */
-      if (
-        normalizedProject.storySummary.trim() &&
-        normalizedProject.storySummaryFingerprint ===
-          currentFingerprint
-      ) {
-        return
-      }
+  // --------------------------------------------------
+  // Story summary generation
+  // --------------------------------------------------
 
-      /**
-       * Do not generate a summary when there are no
-       * previous scenes yet.
-       *
-       * This is important for a brand-new project:
-       * the first scene does not have any story
-       * history that needs summarizing.
-       */
-      if (!currentFingerprint.trim()) {
-        return
-      }
-
-      setSummaryGenerating(true)
-
-      try {
-        const summary =
-          await generateStorySummary(
-            normalizedProject,
-            targetScene,
+  const updateStorySummary =
+    useCallback(
+      async (
+        targetProject: MnemeonaProject = project,
+      ) => {
+        const normalizedProject =
+          normalizeProject(
+            targetProject,
           )
 
-        if (!summary.trim()) {
+        const sceneId =
+          normalizedProject.settings
+            .activeSceneId
+
+        if (!sceneId) {
           return
         }
 
-        setProject((current) => ({
-          ...normalizeProject(current),
-          storySummary: summary,
-          storySummaryFingerprint:
-            currentFingerprint,
-          updatedAt:
-            new Date().toISOString(),
-        }))
-      } catch (error) {
-        console.error(
-          "Failed to generate story summary:",
-          error,
-        )
-      } finally {
-        setSummaryGenerating(false)
-      }
-    },
-    [project],
-  )
-
-  // --------------------------------------------------
-  // Project
-  // --------------------------------------------------
-
-  const createNewProject = useCallback(
-    (
-      title = "Untitled Novel",
-    ) => {
-      projectActions.createNewProject(
-        setProject,
-        title,
-      )
-    },
-    [],
-  )
-
-  const loadProject = useCallback(
-    () => {
-      projectActions.loadProject(
-        (loadedProject) => {
-          setProject(
-            normalizeProject(
-              loadedProject,
-            ),
-          )
-        },
-      )
-    },
-    [],
-  )
-
-  // --------------------------------------------------
-  // Save Project
-  // --------------------------------------------------
-
-  const saveProject = useCallback(
-    async () => {
-      let projectToSave =
-        normalizeProject(project)
-
-      const sceneId =
-        projectToSave.settings.activeSceneId
-
-      if (sceneId) {
-        const scene =
+        const targetScene =
           findScene(
-            projectToSave.manuscript.acts,
+            normalizedProject.manuscript.acts,
             sceneId,
           )
 
-        if (scene) {
-          const fingerprint =
-            buildStorySummaryFingerprint(
-              projectToSave,
-              sceneId,
+        if (!targetScene) {
+          return
+        }
+
+        const fingerprint =
+          buildStorySummaryFingerprint(
+            normalizedProject,
+            sceneId,
+          )
+
+        /**
+         * There is no story before the first scene,
+         * so there is nothing meaningful to summarize.
+         */
+        if (!fingerprint.trim()) {
+          return
+        }
+
+        /**
+         * The stored summary already represents the
+         * exact previous-story state.
+         */
+        if (
+          normalizedProject.storySummary.trim() &&
+          normalizedProject.storySummaryFingerprint ===
+            fingerprint
+        ) {
+          return
+        }
+
+        /**
+         * Never allow two summary requests to overlap.
+         */
+        if (
+          summaryRequestInProgress.current
+        ) {
+          return
+        }
+
+        summaryRequestInProgress.current =
+          true
+
+        setSummaryGenerating(
+          true,
+        )
+
+        try {
+          const summary =
+            await generateStorySummary(
+              normalizedProject,
+              targetScene,
             )
 
-          /**
-           * Only generate a summary if there are
-           * previous scenes to summarize.
-           */
-          const hasPreviousScenes =
-            fingerprint.trim().length > 0
-
-          const summaryIsCurrent =
-            Boolean(
-              projectToSave.storySummary.trim(),
-            ) &&
-            projectToSave.storySummaryFingerprint ===
-              fingerprint
-
-          if (
-            hasPreviousScenes &&
-            !summaryIsCurrent
-          ) {
-            setSummaryGenerating(true)
-
-            try {
-              const summary =
-                await generateStorySummary(
-                  projectToSave,
-                  scene,
-                )
-
-              if (summary.trim()) {
-                projectToSave = {
-                  ...projectToSave,
-                  storySummary: summary,
-                  storySummaryFingerprint:
-                    fingerprint,
-                  updatedAt:
-                    new Date().toISOString(),
-                }
-
-                setProject(
-                  projectToSave,
-                )
-              }
-            } catch (error) {
-              console.error(
-                "Failed to generate story summary before save:",
-                error,
-              )
-            } finally {
-              setSummaryGenerating(false)
-            }
+          if (!summary?.trim()) {
+            return
           }
+
+          /**
+           * Important:
+           *
+           * Do not blindly write the result into state
+           * if the project changed while the AI request
+           * was running.
+           *
+           * The fingerprint attached to the generated
+           * summary identifies exactly which story state
+           * it represents.
+           */
+          setProject(
+            (currentProject) => {
+              const current =
+                normalizeProject(
+                  currentProject,
+                )
+
+              return {
+                ...current,
+
+                storySummary:
+                  summary,
+
+                storySummaryFingerprint:
+                  fingerprint,
+
+                updatedAt:
+                  new Date().toISOString(),
+              }
+            },
+          )
+        } catch (error) {
+          /**
+           * AI failure must NEVER prevent the application
+           * from rendering or editing.
+           */
+          console.error(
+            "Failed to generate story summary:",
+            error,
+          )
+        } finally {
+          summaryRequestInProgress.current =
+            false
+
+          setSummaryGenerating(
+            false,
+          )
         }
-      }
-
-      await projectActions.saveProject(
-        projectToSave,
-      )
-    },
-    [project],
-  )
-
-  const updateProject = useCallback(
-    (
-      updater: (
-        project: MnemeonaProject,
-      ) => MnemeonaProject,
-    ) =>
-      projectActions.updateProject(
-        setProject,
-        updater,
-      ),
-    [],
-  )
-
-  const renameProject = useCallback(
-    (
-      title: string,
-    ) =>
-      projectActions.renameProject(
-        setProject,
-        title,
-      ),
-    [],
-  )
+      },
+      [project],
+    )
 
   // --------------------------------------------------
-  // Manuscript
-  // --------------------------------------------------
-
-  const setActiveScene = useCallback(
-    (
-      sceneId: string | null,
-    ) => {
-      manuscriptActions.setActiveScene(
-        setProject,
-        sceneId,
-      )
-    },
-    [],
-  )
-
-  const addAct = useCallback(
-    () =>
-      manuscriptActions.addAct(
-        setProject,
-      ),
-    [],
-  )
-
-  const addChapter = useCallback(
-    (
-      actId: string,
-    ) =>
-      manuscriptActions.addChapter(
-        setProject,
-        actId,
-      ),
-    [],
-  )
-
-  const addScene = useCallback(
-    (
-      actId: string,
-      chapterId: string,
-    ) =>
-      manuscriptActions.addScene(
-        setProject,
-        actId,
-        chapterId,
-      ),
-    [],
-  )
-
-  const renameAct = useCallback(
-    (
-      actId: string,
-      title: string,
-    ) =>
-      manuscriptActions.renameAct(
-        setProject,
-        actId,
-        title,
-      ),
-    [],
-  )
-
-  const renameChapter = useCallback(
-    (
-      actId: string,
-      chapterId: string,
-      title: string,
-    ) =>
-      manuscriptActions.renameChapter(
-        setProject,
-        actId,
-        chapterId,
-        title,
-      ),
-    [],
-  )
-
-  const renameScene = useCallback(
-    (
-      actId: string,
-      chapterId: string,
-      sceneId: string,
-      title: string,
-    ) =>
-      manuscriptActions.renameScene(
-        setProject,
-        actId,
-        chapterId,
-        sceneId,
-        title,
-      ),
-    [],
-  )
-
-  const deleteAct = useCallback(
-    (
-      actId: string,
-    ) =>
-      manuscriptActions.deleteAct(
-        setProject,
-        actId,
-      ),
-    [],
-  )
-
-  const deleteChapter = useCallback(
-    (
-      actId: string,
-      chapterId: string,
-    ) =>
-      manuscriptActions.deleteChapter(
-        setProject,
-        actId,
-        chapterId,
-      ),
-    [],
-  )
-
-  const deleteScene = useCallback(
-    (
-      actId: string,
-      chapterId: string,
-      sceneId: string,
-    ) =>
-      manuscriptActions.deleteScene(
-        setProject,
-        actId,
-        chapterId,
-        sceneId,
-      ),
-    [],
-  )
-
-  const moveAct = useCallback(
-    (
-      fromIndex: number,
-      toIndex: number,
-    ) =>
-      manuscriptActions.moveAct(
-        setProject,
-        fromIndex,
-        toIndex,
-      ),
-    [],
-  )
-
-  const moveChapter = useCallback(
-    (
-      actId: string,
-      fromIndex: number,
-      toIndex: number,
-    ) =>
-      manuscriptActions.moveChapter(
-        setProject,
-        actId,
-        fromIndex,
-        toIndex,
-        ),
-    [],
-  )
-
-  const moveScene = useCallback(
-    (
-      actId: string,
-      chapterId: string,
-      fromIndex: number,
-      toIndex: number,
-    ) =>
-      manuscriptActions.moveScene(
-        setProject,
-        actId,
-        chapterId,
-        fromIndex,
-        toIndex,
-      ),
-    [],
-  )
-
-  const updateSceneContent = useCallback(
-    (
-      sceneId: string,
-      content: JSONContent,
-    ) =>
-      manuscriptActions.updateSceneContent(
-        setProject,
-        sceneId,
-        content,
-      ),
-    [],
-  )
-
-  // --------------------------------------------------
-  // Automatically update summary when the user
-  // navigates to another scene.
+  // Automatic summary update
   // --------------------------------------------------
 
   useEffect(() => {
+    /**
+     * Initial mount:
+     *
+     * Do nothing.
+     *
+     * This prevents the AI service from becoming part
+     * of application startup.
+     */
     if (!hasMounted.current) {
-      hasMounted.current = true
+      hasMounted.current =
+        true
+
       return
     }
 
@@ -610,67 +389,431 @@ export function ProjectProvider({
       return
     }
 
-    void updateStorySummary(project)
+    /**
+     * There is nothing to summarize before Scene 1.
+     */
+    if (
+      !storySummaryFingerprint.trim()
+    ) {
+      return
+    }
 
-    // The effect intentionally only depends on the
-    // selected scene. The fingerprint check inside
-    // updateStorySummary determines whether an AI
-    // request is actually necessary.
+    /**
+     * If the current summary already corresponds to
+     * the current story state, nothing needs to happen.
+     */
+    if (
+      project.storySummary.trim() &&
+      project.storySummaryFingerprint ===
+        storySummaryFingerprint
+    ) {
+      return
+    }
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSceneId])
+    /**
+     * Summary creation is deliberately fire-and-forget.
+     *
+     * Any AI/Ollama error is caught inside
+     * updateStorySummary and cannot crash React.
+     */
+    void updateStorySummary(
+      project,
+    )
+  }, [
+    activeSceneId,
+    storySummaryFingerprint,
+    project.storySummary,
+    project.storySummaryFingerprint,
+    updateStorySummary,
+  ])
+
+  // --------------------------------------------------
+  // Project actions
+  // --------------------------------------------------
+
+  const createNewProject =
+    useCallback(
+      (
+        title = "Untitled Novel",
+      ) => {
+        projectActions.createNewProject(
+          setProject,
+          title,
+        )
+      },
+      [],
+    )
+
+  const loadProject =
+    useCallback(
+      () => {
+        projectActions.loadProject(
+          (loadedProject) => {
+            setProject(
+              normalizeProject(
+                loadedProject,
+              ),
+            )
+          },
+        )
+      },
+      [],
+    )
+
+  const saveProject =
+    useCallback(
+      async () => {
+        let projectToSave =
+          normalizeProject(
+            project,
+          )
+
+        const sceneId =
+          projectToSave.settings
+            .activeSceneId
+
+        if (sceneId) {
+          const scene =
+            findScene(
+              projectToSave.manuscript.acts,
+              sceneId,
+            )
+
+          if (scene) {
+            const fingerprint =
+              buildStorySummaryFingerprint(
+                projectToSave,
+                sceneId,
+              )
+
+            const hasPreviousStory =
+              fingerprint.trim()
+                .length > 0
+
+            const summaryIsCurrent =
+              Boolean(
+                projectToSave.storySummary.trim(),
+              ) &&
+              projectToSave.storySummaryFingerprint ===
+                fingerprint
+
+            if (
+              hasPreviousStory &&
+              !summaryIsCurrent
+            ) {
+              await updateStorySummary(
+                projectToSave,
+              )
+
+              /**
+               * updateStorySummary writes the generated
+               * summary into React state asynchronously.
+               *
+               * Keep the project being saved synchronized
+               * with the current state before saving.
+               */
+              projectToSave =
+                normalizeProject(
+                  projectToSave,
+                )
+            }
+          }
+        }
+
+        await projectActions.saveProject(
+          projectToSave,
+        )
+      },
+      [
+        project,
+        updateStorySummary,
+      ],
+    )
+
+  const updateProject =
+    useCallback(
+      (
+        updater: (
+          project: MnemeonaProject,
+        ) => MnemeonaProject,
+      ) =>
+        projectActions.updateProject(
+          setProject,
+          updater,
+        ),
+      [],
+    )
+
+  const renameProject =
+    useCallback(
+      (
+        title: string,
+      ) =>
+        projectActions.renameProject(
+          setProject,
+          title,
+        ),
+      [],
+    )
+
+  // --------------------------------------------------
+  // Manuscript
+  // --------------------------------------------------
+
+  const setActiveScene =
+    useCallback(
+      (
+        sceneId: string | null,
+      ) =>
+        manuscriptActions.setActiveScene(
+          setProject,
+          sceneId,
+        ),
+      [],
+    )
+
+  const addAct =
+    useCallback(
+      () =>
+        manuscriptActions.addAct(
+          setProject,
+        ),
+      [],
+    )
+
+  const addChapter =
+    useCallback(
+      (
+        actId: string,
+      ) =>
+        manuscriptActions.addChapter(
+          setProject,
+          actId,
+        ),
+      [],
+    )
+
+  const addScene =
+    useCallback(
+      (
+        actId: string,
+        chapterId: string,
+      ) =>
+        manuscriptActions.addScene(
+          setProject,
+          actId,
+          chapterId,
+        ),
+      [],
+    )
+
+  const renameAct =
+    useCallback(
+      (
+        actId: string,
+        title: string,
+      ) =>
+        manuscriptActions.renameAct(
+          setProject,
+          actId,
+          title,
+        ),
+      [],
+    )
+
+  const renameChapter =
+    useCallback(
+      (
+        actId: string,
+        chapterId: string,
+        title: string,
+      ) =>
+        manuscriptActions.renameChapter(
+          setProject,
+          actId,
+          chapterId,
+          title,
+        ),
+      [],
+    )
+
+  const renameScene =
+    useCallback(
+      (
+        actId: string,
+        chapterId: string,
+        sceneId: string,
+        title: string,
+      ) =>
+        manuscriptActions.renameScene(
+          setProject,
+          actId,
+          chapterId,
+          sceneId,
+          title,
+        ),
+      [],
+    )
+
+  const deleteAct =
+    useCallback(
+      (
+        actId: string,
+      ) =>
+        manuscriptActions.deleteAct(
+          setProject,
+          actId,
+        ),
+      [],
+    )
+
+  const deleteChapter =
+    useCallback(
+      (
+        actId: string,
+        chapterId: string,
+      ) =>
+        manuscriptActions.deleteChapter(
+          setProject,
+          actId,
+          chapterId,
+        ),
+      [],
+    )
+
+  const deleteScene =
+    useCallback(
+      (
+        actId: string,
+        chapterId: string,
+        sceneId: string,
+      ) =>
+        manuscriptActions.deleteScene(
+          setProject,
+          actId,
+          chapterId,
+          sceneId,
+        ),
+      [],
+    )
+
+  const moveAct =
+    useCallback(
+      (
+        fromIndex: number,
+        toIndex: number,
+      ) =>
+        manuscriptActions.moveAct(
+          setProject,
+          fromIndex,
+          toIndex,
+        ),
+      [],
+    )
+
+  const moveChapter =
+    useCallback(
+      (
+        actId: string,
+        fromIndex: number,
+        toIndex: number,
+      ) =>
+        manuscriptActions.moveChapter(
+          setProject,
+          actId,
+          fromIndex,
+          toIndex,
+        ),
+      [],
+    )
+
+  const moveScene =
+    useCallback(
+      (
+        actId: string,
+        chapterId: string,
+        fromIndex: number,
+        toIndex: number,
+      ) =>
+        manuscriptActions.moveScene(
+          setProject,
+          actId,
+          chapterId,
+          fromIndex,
+          toIndex,
+        ),
+      [],
+    )
+
+  const updateSceneContent =
+    useCallback(
+      (
+        sceneId: string,
+        content: JSONContent,
+      ) =>
+        manuscriptActions.updateSceneContent(
+          setProject,
+          sceneId,
+          content,
+        ),
+      [],
+    )
 
   // --------------------------------------------------
   // Characters
   // --------------------------------------------------
 
-  const addCharacter = useCallback(
-    () =>
-      characterActions.addCharacter(
-        setProject,
-      ),
-    [],
-  )
+  const addCharacter =
+    useCallback(
+      () =>
+        characterActions.addCharacter(
+          setProject,
+        ),
+      [],
+    )
 
-  const updateCharacter = useCallback(
-    (
-      characterId: string,
-      updates: Partial<Character>,
-    ) =>
-      characterActions.updateCharacter(
-        setProject,
-        characterId,
-        updates,
-      ),
-    [],
-  )
+  const updateCharacter =
+    useCallback(
+      (
+        characterId: string,
+        updates: Partial<Character>,
+      ) =>
+        characterActions.updateCharacter(
+          setProject,
+          characterId,
+          updates,
+        ),
+      [],
+    )
 
-  const deleteCharacter = useCallback(
-    (
-      characterId: string,
-    ) =>
-      characterActions.deleteCharacter(
-        setProject,
-        characterId,
-      ),
-    [],
-  )
+  const deleteCharacter =
+    useCallback(
+      (
+        characterId: string,
+      ) =>
+        characterActions.deleteCharacter(
+          setProject,
+          characterId,
+        ),
+      [],
+    )
 
-  const updateCharacterContext = useCallback(
-    (
-      characterId: string,
-      enabled: boolean,
-    ) =>
-      characterActions.updateCharacterContext(
-        setProject,
-        characterId,
-        enabled,
-      ),
-    [],
-  )
+  const updateCharacterContext =
+    useCallback(
+      (
+        characterId: string,
+        enabled: boolean,
+      ) =>
+        characterActions.updateCharacterContext(
+          setProject,
+          characterId,
+          enabled,
+        ),
+      [],
+    )
 
   // --------------------------------------------------
-  // Character Relationships
+  // Character relationships
   // --------------------------------------------------
 
   const addCharacterRelationship =
@@ -729,204 +872,213 @@ export function ProjectProvider({
   // Locations
   // --------------------------------------------------
 
-  const addLocation = useCallback(
-    (
-      location: Omit<
-        Location,
-        "id" | "createdAt" | "updatedAt"
-      >,
-    ) =>
-      locationActions.addLocation(
-        setProject,
-        location,
-      ),
-    [],
-  )
+  const addLocation =
+    useCallback(
+      (
+        location: Omit<
+          Location,
+          "id" |
+            "createdAt" |
+            "updatedAt"
+        >,
+      ) =>
+        locationActions.addLocation(
+          setProject,
+          location,
+        ),
+      [],
+    )
 
-  const updateLocation = useCallback(
-    (
-      locationId: string,
-      updates: Partial<Location>,
-    ) =>
-      locationActions.updateLocation(
-        setProject,
-        locationId,
-        updates,
-      ),
-    [],
-  )
+  const updateLocation =
+    useCallback(
+      (
+        locationId: string,
+        updates: Partial<Location>,
+      ) =>
+        locationActions.updateLocation(
+          setProject,
+          locationId,
+          updates,
+        ),
+      [],
+    )
 
-  const deleteLocation = useCallback(
-    (
-      locationId: string,
-    ) =>
-      locationActions.deleteLocation(
-        setProject,
-        locationId,
-      ),
-    [],
-  )
+  const deleteLocation =
+    useCallback(
+      (
+        locationId: string,
+      ) =>
+        locationActions.deleteLocation(
+          setProject,
+          locationId,
+        ),
+      [],
+    )
 
   // --------------------------------------------------
   // Events
   // --------------------------------------------------
 
-  const addEvent = useCallback(
-    (
-      event: Omit<
-        WorldEvent,
-        "id" | "createdAt" | "updatedAt"
-      >,
-    ) =>
-      eventActions.addEvent(
-        setProject,
-        event,
-      ),
-    [],
-  )
+  const addEvent =
+    useCallback(
+      (
+        event: Omit<
+          WorldEvent,
+          "id" |
+            "createdAt" |
+            "updatedAt"
+        >,
+      ) =>
+        eventActions.addEvent(
+          setProject,
+          event,
+        ),
+      [],
+    )
 
-  const updateEvent = useCallback(
-    (
-      eventId: string,
-      updates: Partial<WorldEvent>,
-    ) =>
-      eventActions.updateEvent(
-        setProject,
-        eventId,
-        updates,
-      ),
-    [],
-  )
+  const updateEvent =
+    useCallback(
+      (
+        eventId: string,
+        updates: Partial<WorldEvent>,
+      ) =>
+        eventActions.updateEvent(
+          setProject,
+          eventId,
+          updates,
+        ),
+      [],
+    )
 
-  const deleteEvent = useCallback(
-    (
-      eventId: string,
-    ) =>
-      eventActions.deleteEvent(
-        setProject,
-        eventId,
-      ),
-    [],
-  )
+  const deleteEvent =
+    useCallback(
+      (
+        eventId: string,
+      ) =>
+        eventActions.deleteEvent(
+          setProject,
+          eventId,
+        ),
+      [],
+    )
 
   // --------------------------------------------------
   // Context value
   // --------------------------------------------------
 
-  const value = useMemo(
-    () => ({
-      project,
+  const value =
+    useMemo(
+      () => ({
+        project,
 
-      activeSceneId,
-      activeScene,
+        activeSceneId,
+        activeScene,
 
-      projectWordCount,
-      activeSceneWordCount,
+        projectWordCount,
+        activeSceneWordCount,
 
-      summaryGenerating,
-      updateStorySummary,
+        summaryGenerating,
+        updateStorySummary,
 
-      setActiveScene,
+        createNewProject,
+        loadProject,
+        saveProject,
+        updateProject,
+        renameProject,
 
-      createNewProject,
-      loadProject,
-      saveProject,
-      updateProject,
-      renameProject,
+        setActiveScene,
 
-      // Manuscript
-      addAct,
-      addChapter,
-      addScene,
+        addAct,
+        addChapter,
+        addScene,
 
-      renameAct,
-      renameChapter,
-      renameScene,
+        renameAct,
+        renameChapter,
+        renameScene,
 
-      deleteAct,
-      deleteChapter,
-      deleteScene,
+        deleteAct,
+        deleteChapter,
+        deleteScene,
 
-      moveAct,
-      moveChapter,
-      moveScene,
+        moveAct,
+        moveChapter,
+        moveScene,
 
-      updateSceneContent,
+        updateSceneContent,
 
-      // Characters
-      addCharacter,
-      updateCharacter,
-      deleteCharacter,
-      updateCharacterContext,
+        addCharacter,
+        updateCharacter,
+        deleteCharacter,
+        updateCharacterContext,
 
-      // Character Relationships
-      addCharacterRelationship,
-      updateCharacterRelationship,
-      deleteCharacterRelationship,
+        addCharacterRelationship,
+        updateCharacterRelationship,
+        deleteCharacterRelationship,
 
-      // Locations
-      addLocation,
-      updateLocation,
-      deleteLocation,
+        addLocation,
+        updateLocation,
+        deleteLocation,
 
-      // Events
-      addEvent,
-      updateEvent,
-      deleteEvent,
-    }),
-    [
-      project,
-      activeSceneId,
-      activeScene,
-      projectWordCount,
-      activeSceneWordCount,
+        addEvent,
+        updateEvent,
+        deleteEvent,
+      }),
+      [
+        project,
 
-      summaryGenerating,
-      updateStorySummary,
+        activeSceneId,
+        activeScene,
 
-      setActiveScene,
-      createNewProject,
-      loadProject,
-      saveProject,
-      updateProject,
-      renameProject,
+        projectWordCount,
+        activeSceneWordCount,
 
-      addAct,
-      addChapter,
-      addScene,
+        summaryGenerating,
+        updateStorySummary,
 
-      renameAct,
-      renameChapter,
-      renameScene,
+        createNewProject,
+        loadProject,
+        saveProject,
+        updateProject,
+        renameProject,
 
-      deleteAct,
-      deleteChapter,
-      deleteScene,
+        setActiveScene,
 
-      moveAct,
-      moveChapter,
-      moveScene,
+        addAct,
+        addChapter,
+        addScene,
 
-      updateSceneContent,
+        renameAct,
+        renameChapter,
+        renameScene,
 
-      addCharacter,
-      updateCharacter,
-      deleteCharacter,
-      updateCharacterContext,
+        deleteAct,
+        deleteChapter,
+        deleteScene,
 
-      addCharacterRelationship,
-      updateCharacterRelationship,
-      deleteCharacterRelationship,
+        moveAct,
+        moveChapter,
+        moveScene,
 
-      addLocation,
-      updateLocation,
-      deleteLocation,
+        updateSceneContent,
 
-      addEvent,
-      updateEvent,
-      deleteEvent,
-    ],
-  )
+        addCharacter,
+        updateCharacter,
+        deleteCharacter,
+        updateCharacterContext,
+
+        addCharacterRelationship,
+        updateCharacterRelationship,
+        deleteCharacterRelationship,
+
+        addLocation,
+        updateLocation,
+        deleteLocation,
+
+        addEvent,
+        updateEvent,
+        deleteEvent,
+      ],
+    )
 
   return (
     <ProjectContext.Provider
