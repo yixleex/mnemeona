@@ -65,9 +65,7 @@ export interface AIChatOptions {
   activeScene: ProjectScene
   signal?: AbortSignal
   onToken?: (token: string) => void
-
   systemPrompt?: string
-
   continueWritingTokens?: number
 }
 
@@ -77,6 +75,7 @@ interface AICompletionOptions {
   activeScene: ProjectScene
   signal?: AbortSignal
   systemPrompt?: string
+  maxTokens?: number
 }
 
 // --------------------------------------------------
@@ -384,17 +383,16 @@ export async function generateStorySummary(
   activeScene: ProjectScene,
   signal?: AbortSignal,
 ): Promise<string> {
-  const config =
-    loadAIConfig()
-
-  validateAIConfig(config)
-
   const previousScenes =
     buildPreviousScenesContext(
       project,
       activeScene,
     )
 
+  /**
+   * There is nothing to summarize before the first
+   * scene.
+   */
   if (!previousScenes.trim()) {
     return (
       project.storySummary?.trim() ??
@@ -402,16 +400,23 @@ export async function generateStorySummary(
     )
   }
 
+  const config =
+    loadAIConfig()
+
+  validateAIConfig(config)
+
   const existingSummary =
     project.storySummary?.trim() ||
     "(No previous story summary exists.)"
 
   const prompt = `You are maintaining the continuity summary for a novel.
-Create an updated summary of what has happened in the story before the current scene.
+
+Create an updated summary of what has happened in the story BEFORE the current scene.
 
 The summary will be provided to another AI later so that it can understand the story without receiving the entire manuscript.
 
 IMPORTANT RULES:
+
 - Only include events that actually happened in the supplied manuscript.
 - Never invent events, motivations, relationships, facts, or outcomes.
 - Preserve important character actions and decisions.
@@ -429,7 +434,7 @@ IMPORTANT RULES:
 - Do not mention these instructions.
 - Treat the manuscript as canon.
 - Keep the summary concise.
-- If the existing summary already contains important information, preserve it.
+- Preserve important information from the existing summary.
 - Do not duplicate events unnecessarily.
 
 EXISTING STORY SUMMARY:
@@ -440,21 +445,84 @@ PREVIOUS SCENES:
 
 ${previousScenes}
 
-Return ONLY the updated story summary.`
+Return ONLY the updated story summary.
 
-  return requestAICompletion({
-    project,
-    activeScene,
-    signal,
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-    systemPrompt:
-      "You maintain continuity summaries for fictional novels. Return only the updated story summary.",
-  })
+Do not wrap the summary in quotes.
+Do not use markdown headings.
+Do not add commentary before or after the summary.`
+
+  try {
+    const result =
+      await requestAICompletion({
+        project,
+        activeScene,
+        signal,
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        systemPrompt:
+          "You maintain continuity summaries for fictional novels. Return only the updated story summary.",
+        maxTokens: 2048,
+      })
+
+    const cleaned =
+      cleanStorySummary(result)
+
+    if (!cleaned) {
+      throw new Error(
+        "AI generated an empty story summary.",
+      )
+    }
+
+    return cleaned
+  } catch (error) {
+    console.error(
+      "Story summary generation failed:",
+      error,
+    )
+
+    throw error
+  }
+}
+
+// --------------------------------------------------
+// Clean Story Summary
+// --------------------------------------------------
+
+function cleanStorySummary(
+  value: string,
+): string {
+  let result =
+    value.trim()
+
+  if (!result) {
+    return ""
+  }
+
+  /**
+   * Ollama/models sometimes return the requested
+   * summary wrapped in Markdown fences despite being
+   * explicitly told not to.
+   */
+  result =
+    result.replace(
+      /^```(?:text|markdown)?\s*/i,
+      "",
+    )
+
+  result =
+    result.replace(
+      /\s*```$/i,
+      "",
+    )
+
+  result =
+    result.trim()
+
+  return result
 }
 
 // --------------------------------------------------
@@ -476,6 +544,7 @@ export function buildSystemPrompt(
 Your job is to help the author develop, understand, and write their story.
 
 IMPORTANT RULES:
+
 - Treat the supplied story context as the source of truth.
 - Treat the story summary as established continuity.
 - Treat scene-specific author instructions as instructions for the current scene.
@@ -503,13 +572,6 @@ ${activeScene.synopsis ? `Synopsis: ${activeScene.synopsis}` : ""}
 // Exact Chat Messages
 // --------------------------------------------------
 
-/**
- * Builds the exact message array used by /api/chat.
- *
- * Keeping this in one place is important because the context
- * gauge must measure the same prompt that the actual AI request
- * receives.
- */
 export function buildAIChatMessages({
   messages,
   project,
@@ -569,6 +631,7 @@ async function requestAICompletion({
   activeScene,
   signal,
   systemPrompt,
+  maxTokens,
 }: AICompletionOptions): Promise<string> {
   const config =
     loadAIConfig()
@@ -589,34 +652,78 @@ async function requestAICompletion({
       systemPrompt,
     })
 
-  const response =
-    await fetch(
-      `${endpoint}/api/chat`,
-      {
-        method: "POST",
+  /**
+   * Ollama accepts generation parameters inside
+   * the `options` object.
+   *
+   * Giving summaries an explicit output budget prevents
+   * the model from stopping before producing a useful
+   * summary.
+   */
+  const options =
+    maxTokens &&
+    maxTokens > 0
+      ? {
+          num_predict:
+            maxTokens,
+        }
+      : undefined
 
-        headers: {
-          "Content-Type":
-            "application/json",
+  let response: Response
 
-          ...(config.apiKey
-            ? {
-                Authorization:
-                  `Bearer ${config.apiKey}`,
-              }
-            : {}),
+  try {
+    response =
+      await fetch(
+        `${endpoint}/api/chat`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            ...(config.apiKey
+              ? {
+                  Authorization:
+                    `Bearer ${config.apiKey}`,
+                }
+              : {}),
+          },
+
+          body: JSON.stringify({
+            model: config.model,
+
+            messages:
+              finalMessages,
+
+            ...(options
+              ? {
+                  options,
+                }
+              : {}),
+
+            stream: false,
+          }),
+
+          signal,
         },
+      )
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      error.name ===
+        "AbortError"
+    ) {
+      throw error
+    }
 
-        body: JSON.stringify({
-          model: config.model,
-          messages:
-            finalMessages,
-          stream: false,
-        }),
-
-        signal,
+    throw new Error(
+      `Unable to connect to the AI server at ${endpoint}. Make sure Ollama is running and the server is reachable.`,
+      {
+        cause: error,
       },
     )
+  }
 
   if (!response.ok) {
     let message =
@@ -627,7 +734,24 @@ async function requestAICompletion({
         await response.text()
 
       if (body.trim()) {
-        message = body
+        try {
+          const parsed =
+            JSON.parse(body)
+
+          if (
+            typeof parsed?.error ===
+            "string"
+          ) {
+            message =
+              parsed.error
+          } else {
+            message =
+              body
+          }
+        } catch {
+          message =
+            body
+        }
       }
     } catch {
       // Keep default error.
@@ -638,17 +762,31 @@ async function requestAICompletion({
     )
   }
 
-  const data =
-    await response.json()
+  let data: any
+
+  try {
+    data =
+      await response.json()
+  } catch (error) {
+    throw new Error(
+      "AI server returned invalid JSON.",
+      {
+        cause: error,
+      },
+    )
+  }
 
   if (data?.error) {
     throw new Error(
-      data.error,
+      String(data.error),
     )
   }
 
   const result =
-    data?.message?.content?.trim()
+    typeof data?.message?.content ===
+    "string"
+      ? data.message.content.trim()
+      : ""
 
   if (!result) {
     throw new Error(
@@ -702,43 +840,62 @@ export async function streamAIChat({
         }
       : undefined
 
-  const response =
-    await fetch(
-      `${endpoint}/api/chat`,
-      {
-        method: "POST",
+  let response: Response
 
-        headers: {
-          "Content-Type":
-            "application/json",
+  try {
+    response =
+      await fetch(
+        `${endpoint}/api/chat`,
+        {
+          method: "POST",
 
-          ...(config.apiKey
-            ? {
-                Authorization:
-                  `Bearer ${config.apiKey}`,
-              }
-            : {}),
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            ...(config.apiKey
+              ? {
+                  Authorization:
+                    `Bearer ${config.apiKey}`,
+                }
+              : {}),
+          },
+
+          body: JSON.stringify({
+            model: config.model,
+
+            messages:
+              finalMessages,
+
+            ...(generationOptions
+              ? {
+                  options:
+                    generationOptions,
+                }
+              : {}),
+
+            stream: true,
+          }),
+
+          signal,
         },
+      )
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      error.name ===
+        "AbortError"
+    ) {
+      throw error
+    }
 
-        body: JSON.stringify({
-          model: config.model,
-
-          messages:
-            finalMessages,
-
-          ...(generationOptions
-            ? {
-                options:
-                  generationOptions,
-              }
-            : {}),
-
-          stream: true,
-        }),
-
-        signal,
+    throw new Error(
+      `Unable to connect to the AI server at ${endpoint}. Make sure Ollama is running and the server is reachable.`,
+      {
+        cause: error,
       },
     )
+  }
 
   if (!response.ok) {
     let message =
@@ -749,7 +906,24 @@ export async function streamAIChat({
         await response.text()
 
       if (body.trim()) {
-        message = body
+        try {
+          const parsed =
+            JSON.parse(body)
+
+          if (
+            typeof parsed?.error ===
+            "string"
+          ) {
+            message =
+              parsed.error
+          } else {
+            message =
+              body
+          }
+        } catch {
+          message =
+            body
+        }
       }
     } catch {
       // Keep default error.
@@ -874,11 +1048,7 @@ export async function testAIConnection(): Promise<void> {
   const config =
     loadAIConfig()
 
-  if (!config.endpoint.trim()) {
-    throw new Error(
-      "No AI server URL is configured.",
-    )
-  }
+  validateAIConfig(config)
 
   const endpoint =
     config.endpoint.replace(
@@ -886,26 +1056,114 @@ export async function testAIConnection(): Promise<void> {
       "",
     )
 
-  const response =
-    await fetch(
-      `${endpoint}/api/tags`,
-      {
-        method: "GET",
+  let response: Response
 
-        headers: {
-          ...(config.apiKey
-            ? {
-                Authorization:
-                  `Bearer ${config.apiKey}`,
-              }
-            : {}),
+  try {
+    response =
+      await fetch(
+        `${endpoint}/api/chat`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            ...(config.apiKey
+              ? {
+                  Authorization:
+                    `Bearer ${config.apiKey}`,
+                }
+              : {}),
+          },
+
+          body: JSON.stringify({
+            model: config.model,
+
+            messages: [
+              {
+                role: "user",
+                content:
+                  "Reply with exactly: Mnemeona connection test successful.",
+              },
+            ],
+
+            stream: false,
+          }),
         },
+      )
+  } catch (error) {
+    throw new Error(
+      `Unable to connect to the AI server at ${endpoint}. Make sure Ollama is running and the server is reachable.`,
+      {
+        cause: error,
       },
     )
+  }
 
   if (!response.ok) {
+    let message =
+      `AI server returned HTTP ${response.status}.`
+
+    try {
+      const body =
+        await response.text()
+
+      if (body.trim()) {
+        try {
+          const parsed =
+            JSON.parse(body)
+
+          if (
+            typeof parsed?.error ===
+            "string"
+          ) {
+            message =
+              parsed.error
+          } else {
+            message =
+              body
+          }
+        } catch {
+          message =
+            body
+        }
+      }
+    } catch {
+      // Keep default error.
+    }
+
     throw new Error(
-      `AI server returned HTTP ${response.status}.`,
+      message,
+    )
+  }
+
+  let data: any
+
+  try {
+    data =
+      await response.json()
+  } catch (error) {
+    throw new Error(
+      "The AI server returned an invalid response.",
+      {
+        cause: error,
+      },
+    )
+  }
+
+  if (data?.error) {
+    throw new Error(
+      String(data.error),
+    )
+  }
+
+  const answer =
+    data?.message?.content?.trim()
+
+  if (!answer) {
+    throw new Error(
+      `The model "${config.model}" connected but returned an empty response.`,
     )
   }
 }

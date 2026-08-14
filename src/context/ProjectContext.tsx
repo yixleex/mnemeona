@@ -71,24 +71,13 @@ function normalizeProject(
 // --------------------------------------------------
 
 /**
- * Creates a deterministic representation of every
- * scene BEFORE the currently active scene.
+ * Creates a deterministic representation of all scenes
+ * BEFORE the currently active scene.
  *
  * The active scene itself is deliberately excluded.
  *
- * This means:
- *
- * Scene 1 -> Scene 2
- *   => summarize Scene 1
- *
- * Edit Scene 1 -> Scene 2
- *   => summarize again
- *
- * Edit Scene 2 while staying in Scene 2
- *   => do NOT summarize Scene 2 itself
- *
- * Enter Scene 3
- *   => Scene 1 + Scene 2 are now included
+ * This gives us a reliable way to determine whether the
+ * existing story summary is still valid.
  */
 function buildStorySummaryFingerprint(
   project: MnemeonaProject,
@@ -160,25 +149,18 @@ export function ProjectProvider({
     useState(false)
 
   /**
-   * Prevents summary generation during the initial
-   * React mount.
+   * Prevents the initial project mount from invoking
+   * the AI summary service.
    *
-   * This is the important startup-crash protection.
-   *
-   * A newly-created project normally has an active
-   * first scene. We do NOT want that to immediately
-   * invoke the AI service while the application is
-   * booting.
+   * A new project starts with its first scene selected,
+   * but there is no previous story to summarize yet.
    */
   const hasMounted =
     useRef(false)
 
   /**
-   * Prevent multiple simultaneous summary requests.
-   *
-   * React can produce multiple state changes while the
-   * user is editing/navigating. We only want one AI
-   * summary request at a time.
+   * Prevents multiple AI summary requests from running
+   * simultaneously.
    */
   const summaryRequestInProgress =
     useRef(false)
@@ -211,30 +193,57 @@ export function ProjectProvider({
     )
 
   // --------------------------------------------------
-  // Story summary fingerprint
+  // Current story-summary fingerprint
   // --------------------------------------------------
 
   const storySummaryFingerprint =
-    useMemo(
-      () =>
-        buildStorySummaryFingerprint(
-          project,
-          activeSceneId,
-        ),
-      [
-        project,
-        activeSceneId,
-      ],
+    buildStorySummaryFingerprint(
+      project,
+      activeSceneId,
     )
 
   // --------------------------------------------------
   // Story summary generation
   // --------------------------------------------------
 
+  function showStorySummaryError(
+    error: unknown,
+  ): void {
+    let message =
+      "Unknown error"
+
+    if (error instanceof Error) {
+      message =
+        error.message ||
+        "Unknown error"
+    } else if (
+      typeof error === "string"
+    ) {
+      message = error
+    } else {
+      try {
+        message =
+          JSON.stringify(error)
+      } catch {
+        message =
+          "Unknown error"
+      }
+    }
+
+    console.error(
+      "STORY SUMMARY GENERATION FAILED:",
+      error,
+    )
+
+    window.alert(
+      `Story Summary Failed\n\n${message}\n\nCheck the browser console for additional details.`,
+    )
+  }
+
   const updateStorySummary =
     useCallback(
       async (
-        targetProject: MnemeonaProject = project,
+        targetProject: MnemeonaProject,
       ) => {
         const normalizedProject =
           normalizeProject(
@@ -266,19 +275,19 @@ export function ProjectProvider({
           )
 
         /**
-         * There is no story before the first scene,
-         * so there is nothing meaningful to summarize.
+         * There is no previous story before the first
+         * scene, so there is nothing to summarize.
          */
         if (!fingerprint.trim()) {
           return
         }
 
         /**
-         * The stored summary already represents the
-         * exact previous-story state.
+         * The current summary already represents the
+         * exact story state before this scene.
          */
         if (
-          normalizedProject.storySummary.trim() &&
+          normalizedProject.storySummary?.trim() &&
           normalizedProject.storySummaryFingerprint ===
             fingerprint
         ) {
@@ -286,7 +295,7 @@ export function ProjectProvider({
         }
 
         /**
-         * Never allow two summary requests to overlap.
+         * Don't allow overlapping AI requests.
          */
         if (
           summaryRequestInProgress.current
@@ -297,9 +306,7 @@ export function ProjectProvider({
         summaryRequestInProgress.current =
           true
 
-        setSummaryGenerating(
-          true,
-        )
+        setSummaryGenerating(true)
 
         try {
           const summary =
@@ -313,15 +320,12 @@ export function ProjectProvider({
           }
 
           /**
-           * Important:
+           * The manuscript can change while the AI is
+           * generating.
            *
-           * Do not blindly write the result into state
-           * if the project changed while the AI request
-           * was running.
-           *
-           * The fingerprint attached to the generated
-           * summary identifies exactly which story state
-           * it represents.
+           * Only accept the generated summary if the
+           * project still represents the exact same
+           * story state that was sent to the AI.
            */
           setProject(
             (currentProject) => {
@@ -329,6 +333,34 @@ export function ProjectProvider({
                 normalizeProject(
                   currentProject,
                 )
+
+              const currentSceneId =
+                current.settings
+                  .activeSceneId
+
+              if (
+                currentSceneId !==
+                sceneId
+              ) {
+                return current
+              }
+
+              const currentFingerprint =
+                buildStorySummaryFingerprint(
+                  current,
+                  currentSceneId,
+                )
+
+              if (
+                currentFingerprint !==
+                fingerprint
+              ) {
+                /**
+                 * The story changed while the request was
+                 * running. Don't attach a stale summary.
+                 */
+                return current
+              }
 
               return {
                 ...current,
@@ -346,9 +378,10 @@ export function ProjectProvider({
           )
         } catch (error) {
           /**
-           * AI failure must NEVER prevent the application
-           * from rendering or editing.
+           * AI/Ollama failures must never crash the
+           * application.
            */
+          showStorySummaryError(error)
           console.error(
             "Failed to generate story summary:",
             error,
@@ -357,26 +390,22 @@ export function ProjectProvider({
           summaryRequestInProgress.current =
             false
 
-          setSummaryGenerating(
-            false,
-          )
+          setSummaryGenerating(false)
         }
       },
-      [project],
+      [],
     )
 
   // --------------------------------------------------
-  // Automatic summary update
+  // Automatic story-summary update
   // --------------------------------------------------
 
   useEffect(() => {
     /**
-     * Initial mount:
+     * Never generate a summary during the initial
+     * application mount.
      *
-     * Do nothing.
-     *
-     * This prevents the AI service from becoming part
-     * of application startup.
+     * This is the startup-crash protection.
      */
     if (!hasMounted.current) {
       hasMounted.current =
@@ -390,20 +419,17 @@ export function ProjectProvider({
     }
 
     /**
-     * There is nothing to summarize before Scene 1.
+     * First scene has no previous story.
      */
-    if (
-      !storySummaryFingerprint.trim()
-    ) {
+    if (!storySummaryFingerprint.trim()) {
       return
     }
 
     /**
-     * If the current summary already corresponds to
-     * the current story state, nothing needs to happen.
+     * Nothing has changed since the last summary.
      */
     if (
-      project.storySummary.trim() &&
+      project.storySummary?.trim() &&
       project.storySummaryFingerprint ===
         storySummaryFingerprint
     ) {
@@ -411,11 +437,14 @@ export function ProjectProvider({
     }
 
     /**
-     * Summary creation is deliberately fire-and-forget.
-     *
-     * Any AI/Ollama error is caught inside
-     * updateStorySummary and cannot crash React.
+     * An existing request is already processing.
      */
+    if (
+      summaryRequestInProgress.current
+    ) {
+      return
+    }
+
     void updateStorySummary(
       project,
     )
@@ -424,6 +453,7 @@ export function ProjectProvider({
     storySummaryFingerprint,
     project.storySummary,
     project.storySummaryFingerprint,
+    project,
     updateStorySummary,
   ])
 
@@ -463,71 +493,16 @@ export function ProjectProvider({
   const saveProject =
     useCallback(
       async () => {
-        let projectToSave =
+        const projectToSave =
           normalizeProject(
             project,
           )
-
-        const sceneId =
-          projectToSave.settings
-            .activeSceneId
-
-        if (sceneId) {
-          const scene =
-            findScene(
-              projectToSave.manuscript.acts,
-              sceneId,
-            )
-
-          if (scene) {
-            const fingerprint =
-              buildStorySummaryFingerprint(
-                projectToSave,
-                sceneId,
-              )
-
-            const hasPreviousStory =
-              fingerprint.trim()
-                .length > 0
-
-            const summaryIsCurrent =
-              Boolean(
-                projectToSave.storySummary.trim(),
-              ) &&
-              projectToSave.storySummaryFingerprint ===
-                fingerprint
-
-            if (
-              hasPreviousStory &&
-              !summaryIsCurrent
-            ) {
-              await updateStorySummary(
-                projectToSave,
-              )
-
-              /**
-               * updateStorySummary writes the generated
-               * summary into React state asynchronously.
-               *
-               * Keep the project being saved synchronized
-               * with the current state before saving.
-               */
-              projectToSave =
-                normalizeProject(
-                  projectToSave,
-                )
-            }
-          }
-        }
 
         await projectActions.saveProject(
           projectToSave,
         )
       },
-      [
-        project,
-        updateStorySummary,
-      ],
+      [project],
     )
 
   const updateProject =

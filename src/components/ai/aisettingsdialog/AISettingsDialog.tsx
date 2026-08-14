@@ -51,6 +51,9 @@ export function AISettingsDialog({
       "idle" | "success" | "error"
     >("idle")
 
+  const [connectionError, setConnectionError] =
+    useState("")
+
   // --------------------------------------------------
   // Load settings whenever dialog opens
   // --------------------------------------------------
@@ -63,6 +66,7 @@ export function AISettingsDialog({
     setConfig(loadAIConfig())
     setSaved(false)
     setConnectionStatus("idle")
+    setConnectionError("")
   }, [open])
 
   // --------------------------------------------------
@@ -82,6 +86,7 @@ export function AISettingsDialog({
 
     setSaved(false)
     setConnectionStatus("idle")
+    setConnectionError("")
   }
 
   // --------------------------------------------------
@@ -91,15 +96,13 @@ export function AISettingsDialog({
   const handleSave = () => {
     saveAIConfig(config)
 
-    // Read it back immediately.
-    // This verifies that the browser actually
-    // stored the configuration.
     const savedConfig =
       loadAIConfig()
 
     setConfig(savedConfig)
     setSaved(true)
     setConnectionStatus("idle")
+    setConnectionError("")
 
     window.setTimeout(() => {
       setSaved(false)
@@ -112,33 +115,83 @@ export function AISettingsDialog({
 
   const handleTestConnection =
     async () => {
+      const endpoint =
+        config.endpoint.trim()
+
+      const model =
+        config.model.trim()
+
+      if (!endpoint) {
+        setConnectionStatus("error")
+        setConnectionError(
+          "Enter a server URL before testing the connection.",
+        )
+        return
+      }
+
+      if (!model) {
+        setConnectionStatus("error")
+        setConnectionError(
+          "Enter a model before testing the connection.",
+        )
+        return
+      }
+
       setTesting(true)
       setConnectionStatus("idle")
+      setConnectionError("")
 
       try {
         /*
          * Save the current form first.
          *
-         * This means if the user changes the
-         * server URL/model and immediately clicks
-         * Test Connection, the test uses those
-         * values instead of the previous settings.
+         * This ensures the test uses the values currently
+         * displayed in the dialog rather than older settings.
          */
-        saveAIConfig(config)
+        saveAIConfig({
+          ...config,
+          endpoint,
+          model,
+        })
 
+        /*
+         * This now performs an actual model request rather
+         * than merely checking /api/tags.
+         */
         await testAIConnection()
 
         setConnectionStatus(
           "success",
         )
-      } catch {
+        setConnectionError("")
+      } catch (error) {
+        console.error(
+          "AI model connection test failed:",
+          error,
+        )
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "The configured AI model could not answer the test request."
+
         setConnectionStatus(
           "error",
+        )
+        setConnectionError(
+          message,
         )
       } finally {
         setTesting(false)
       }
     }
+
+  const canTest =
+    config.endpoint.trim().length >
+      0 &&
+    config.model.trim().length >
+      0 &&
+    !testing
 
   return (
     <Dialog
@@ -359,25 +412,31 @@ export function AISettingsDialog({
                       <div className="flex items-center gap-2 text-sm text-green-600">
                         <Check className="size-4 shrink-0" />
 
-                        Server connection
-                        successful.
+                        Model responded
+                        successfully.
                       </div>
                     )}
 
                     {connectionStatus ===
                       "error" && (
-                      <div className="text-sm text-destructive">
-                        Could not connect to
-                        the local model
-                        server.
+                      <div className="space-y-1">
+                        <div className="text-sm font-medium text-destructive">
+                          AI model test failed.
+                        </div>
+
+                        {connectionError && (
+                          <div className="max-w-[420px] text-xs leading-relaxed text-destructive/80">
+                            {connectionError}
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {connectionStatus ===
                       "idle" && (
                       <span className="text-xs text-muted-foreground">
-                        Test your connection
-                        before using AI.
+                        Enter a model and test that it can
+                        actually respond before using AI.
                       </span>
                     )}
 
@@ -388,15 +447,16 @@ export function AISettingsDialog({
                     onClick={
                       handleTestConnection
                     }
-                    disabled={testing}
+                    disabled={!canTest}
                   >
                     {testing ? (
                       <>
                         <Loader2 className="mr-2 size-4 animate-spin" />
+
                         Testing...
                       </>
                     ) : (
-                      "Test Connection"
+                      "Test Model"
                     )}
                   </Button>
                 </div>
@@ -420,6 +480,7 @@ export function AISettingsDialog({
                     When using a local model, your
                     manuscript and AI context can
                     remain on your computer.
+
                     Mnemeona will communicate
                     directly with the configured
                     local server.
@@ -442,11 +503,14 @@ export function AISettingsDialog({
               )}
 
               <Button
-                onClick={handleSave}
+                onClick={
+                  handleSave
+                }
               >
                 Save AI Settings
               </Button>
             </div>
+
           </div>
         </div>
 
