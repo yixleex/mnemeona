@@ -18,7 +18,6 @@ import { AITextMark } from "./AITextMark"
 
 import {
   loadContinueWritingLength,
-  loadSceneAIContext,
   streamAIChat,
 } from "@/components/ai/aiservice/aiService"
 
@@ -195,10 +194,9 @@ export function NovelEditor() {
          * changing it in the AI Context panel does not
          * require the editor to be recreated.
          */
-        const sceneAIContext =
-          loadSceneAIContext(
-            activeScene.id,
-          ).trim()
+         const sceneAIContext =
+           activeScene.aiAdditionalContext
+             ?.trim() ?? ""
 
         /*
          * Continue must ALWAYS start from the actual

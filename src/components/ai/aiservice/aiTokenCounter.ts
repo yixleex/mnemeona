@@ -1,7 +1,6 @@
 import {
   buildSystemPrompt,
   loadAIConfig,
-  loadSceneAIContext,
 } from "./aiService"
 
 import type { MnemeonaProject } from "@/types/project"
@@ -181,9 +180,8 @@ export function buildTokenizerMessages(
     )
 
   const additionalContext =
-    loadSceneAIContext(
-      activeScene.id,
-    ).trim()
+    activeScene.aiAdditionalContext
+      ?.trim() ?? ""
 
   const result: TokenMessage[] = [
     {
@@ -869,9 +867,8 @@ export function createAITokenCountKey(
     )
 
   const additionalContext =
-    loadSceneAIContext(
-      request.activeScene.id,
-    )
+    request.activeScene.aiAdditionalContext
+      ?.trim() ?? ""
 
   const config =
     loadAIConfig()

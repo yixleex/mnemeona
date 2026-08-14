@@ -8,6 +8,11 @@ import type { JSONContent } from "@tiptap/core"
  * Detects character names and aliases mentioned
  * in the text of a scene.
  *
+ * Detection searches both:
+ *
+ * 1. The actual scene manuscript text.
+ * 2. The scene's Additional Context.
+ *
  * This does not modify the scene or characterIds.
  * It only reports possible character references.
  */
@@ -17,6 +22,7 @@ export function detectCharacterMentions(
 ): CharacterMention[] {
   const text = extractSceneText(
     scene.content,
+    scene.aiAdditionalContext,
   )
 
   if (!text.trim()) {
@@ -84,14 +90,27 @@ export function detectCharacterMentions(
 
 /**
  * Recursively extracts readable text from
- * a Tiptap JSON document.
+ * a Tiptap JSON document and combines it with
+ * Additional Context.
  */
 function extractSceneText(
   content: JSONContent,
+  additionalContext?: string,
 ): string {
   const parts: string[] = []
 
-  walkContent(content, parts)
+  walkContent(
+    content,
+    parts,
+  )
+
+  if (
+    additionalContext?.trim()
+  ) {
+    parts.push(
+      additionalContext.trim(),
+    )
+  }
 
   return parts.join(" ")
 }
@@ -109,7 +128,10 @@ function walkContent(
   }
 
   for (const child of node.content) {
-    walkContent(child, parts)
+    walkContent(
+      child,
+      parts,
+    )
   }
 }
 

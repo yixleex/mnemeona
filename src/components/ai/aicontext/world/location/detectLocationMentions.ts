@@ -8,6 +8,11 @@ import type { LocationMention } from "./locationContext"
  * Detects location names mentioned in
  * the text of a scene.
  *
+ * Detection searches both:
+ *
+ * 1. The actual scene manuscript text.
+ * 2. The scene's Additional Context.
+ *
  * This does not modify the scene.
  * It only reports possible location references.
  *
@@ -21,6 +26,7 @@ export function detectLocationMentions(
   const text =
     extractSceneText(
       scene.content,
+      scene.aiAdditionalContext,
     )
 
   if (!text.trim()) {
@@ -75,10 +81,12 @@ export function detectLocationMentions(
 
 /**
  * Recursively extracts readable text
- * from a Tiptap JSON document.
+ * from a Tiptap JSON document and combines it
+ * with Additional Context.
  */
 function extractSceneText(
   content: JSONContent,
+  additionalContext?: string,
 ): string {
   const parts: string[] = []
 
@@ -86,6 +94,14 @@ function extractSceneText(
     content,
     parts,
   )
+
+  if (
+    additionalContext?.trim()
+  ) {
+    parts.push(
+      additionalContext.trim(),
+    )
+  }
 
   return parts.join(" ")
 }

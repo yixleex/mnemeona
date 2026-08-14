@@ -29,4 +29,5 @@ export type Scene = {
   characterIds: string[];
   location?: string;
   time?: string;
+  aiAdditionalContext?: string
 };

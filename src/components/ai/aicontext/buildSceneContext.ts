@@ -118,6 +118,22 @@ export function formatStoryContext(
   }
 
   // --------------------------------------------------
+  // Additional Context
+  // --------------------------------------------------
+
+  if (
+    context.scene.aiAdditionalContext?.trim()
+  ) {
+    sections.push(
+      [
+        "## Additional Scene Context",
+        "",
+        context.scene.aiAdditionalContext.trim(),
+      ].join("\n"),
+    )
+  }
+
+  // --------------------------------------------------
   // Locations
   // --------------------------------------------------
 
@@ -156,7 +172,7 @@ export function formatStoryContext(
 
     sections.push(
       [
-        "## Characters Present",
+        "## Characters",
 
         "",
 

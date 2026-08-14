@@ -22,12 +22,11 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   buildSceneContext,
   formatStoryContext,
-} from "@/components/ai/context/buildSceneContext"
+} from "@/components/ai/aicontext/buildSceneContext"
+
 import {
   loadContinueWritingLength,
-  loadSceneAIContext,
   saveContinueWritingLength,
-  saveSceneAIContext,
 } from "@/components/ai/aiservice/aiService"
 
 import { useAITokenCount } from "@/components/ai/aiservice/useAITokenCount"
@@ -46,6 +45,7 @@ export function AIContextPanel({
   const {
     project,
     activeScene,
+    updateProject,
   } = useProject()
 
   const [
@@ -55,28 +55,15 @@ export function AIContextPanel({
     loadContinueWritingLength(),
   )
 
-  const [
-    sceneAIContext,
-    setSceneAIContext,
-  ] = useState("")
-
   /*
-   * Load scene-specific instructions.
+   * Additional Context now comes directly from the
+   * active Scene instead of localStorage.
+   *
+   * This means the value is part of the persisted
+   * project data.
    */
-  useEffect(() => {
-    if (!activeScene) {
-      setSceneAIContext("")
-      return
-    }
-
-    setSceneAIContext(
-      loadSceneAIContext(
-        activeScene.id,
-      ),
-    )
-  }, [
-    activeScene?.id,
-  ])
+  const sceneAIContext =
+    activeScene?.aiAdditionalContext ?? ""
 
   /*
    * Load the saved Continue AI token budget.
@@ -132,6 +119,7 @@ export function AIContextPanel({
   // --------------------------------------------------
   // Empty State
   // --------------------------------------------------
+
   if (!activeScene) {
     return (
       <div className="flex h-full flex-col">
@@ -186,6 +174,8 @@ export function AIContextPanel({
   /*
    * Story summary belongs to the project rather than the scene
    * formatter, so it is added to the formatted AI context here.
+   *
+   * Additional Context is already part of formatted.text.
    */
   const storySummary =
     project.storySummary?.trim() ?? ""
@@ -201,7 +191,8 @@ export function AIContextPanel({
 
   /*
    * Keep the displayed token estimate synchronized with the
-   * actual formatted text, including the story summary.
+   * actual formatted text, including the story summary and
+   * Additional Context.
    */
   const formattedEstimatedTokens =
     formattedText.trim()
@@ -250,13 +241,51 @@ export function AIContextPanel({
     (
       value: string,
     ) => {
-      setSceneAIContext(
-        value,
-      )
+      /*
+       * Update the actual Scene in the project.
+       *
+       * This replaces the previous localStorage-only
+       * implementation.
+       */
+      updateProject(
+        (currentProject) => ({
+          ...currentProject,
 
-      saveSceneAIContext(
-        activeScene.id,
-        value,
+          manuscript: {
+            ...currentProject.manuscript,
+
+            acts:
+              currentProject.manuscript.acts.map(
+                (act) => ({
+                  ...act,
+
+                  chapters:
+                    act.chapters.map(
+                      (chapter) => ({
+                        ...chapter,
+
+                        scenes:
+                          chapter.scenes.map(
+                            (scene) =>
+                              scene.id ===
+                              activeScene.id
+                                ? {
+                                    ...scene,
+
+                                    aiAdditionalContext:
+                                      value,
+                                  }
+                                : scene,
+                          ),
+                      }),
+                    ),
+                }),
+              ),
+          },
+
+          updatedAt:
+            new Date().toISOString(),
+        }),
       )
     }
 
@@ -375,7 +404,7 @@ export function AIContextPanel({
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                Additional instructions that should only apply to this
+                Additional information that should apply to this
                 scene.
               </p>
             </div>
@@ -396,13 +425,14 @@ export function AIContextPanel({
                     event.target.value,
                   )
                 }
-                placeholder="For example: Keep the conversation tense. The character is hiding what really happened last night..."
+                placeholder="For example: Elara is secretly meeting Marcus at Blackwood Manor tonight. She knows something Marcus does not..."
                 className="mt-3 min-h-[140px] resize-y"
               />
 
               <p className="mt-2 text-xs text-muted-foreground">
-                This context is saved automatically for this scene
-                and will be included in AI requests.
+                This context is saved directly to the scene. It is
+                included in Formatted AI Context and is also searched
+                for character and location references.
               </p>
             </div>
           </section>
@@ -482,7 +512,6 @@ export function AIContextPanel({
                     )}
                   </div>
 
-                  {/* Animated calculation indicator */}
                   {isCalculating && (
                     <div className="mt-4">
                       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -496,7 +525,6 @@ export function AIContextPanel({
                     </div>
                   )}
 
-                  {/* Static gauge */}
                   {!isCalculating && (
                     <div className="mt-4">
                       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -521,7 +549,6 @@ export function AIContextPanel({
                     </div>
                   )}
 
-                  {/* Breakdown */}
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <div className="rounded-lg bg-muted/40 p-3">
                       <p className="text-xs text-muted-foreground">
@@ -553,7 +580,6 @@ export function AIContextPanel({
                     </div>
                   </div>
 
-                  {/* Status */}
                   {isApproximate &&
                     tokenCount.tokenizerError && (
                       <p className="mt-3 break-words text-xs text-muted-foreground">
@@ -562,7 +588,6 @@ export function AIContextPanel({
                       </p>
                     )}
 
-                  {/* Context warning */}
                   {tokenCount.contextLength &&
                     tokenCount.totalTokens >
                       tokenCount.contextLength && (
@@ -664,7 +689,8 @@ export function AIContextPanel({
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                References discovered directly in the scene text.
+                References discovered in the scene text and Additional
+                Context.
               </p>
             </div>
 
@@ -747,6 +773,18 @@ export function AIContextPanel({
                   </div>
                 )}
               </div>
+
+              {activeScene.aiAdditionalContext?.trim() && (
+                <div className="mt-4 border-t pt-4">
+                  <span className="text-sm text-muted-foreground">
+                    Additional Context
+                  </span>
+
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">
+                    {activeScene.aiAdditionalContext.trim()}
+                  </p>
+                </div>
+              )}
             </div>
           </section>
 
@@ -760,7 +798,8 @@ export function AIContextPanel({
 
                 <p className="text-sm text-muted-foreground">
                   This is the exact context generated for the AI,
-                  including the project story summary.
+                  including the project story summary and Additional
+                  Context.
                 </p>
               </div>
 

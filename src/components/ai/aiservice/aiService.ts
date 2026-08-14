@@ -1,7 +1,7 @@
 import {
   buildSceneContext,
   formatStoryContext,
-} from "../context/buildSceneContext"
+} from "../aicontext/buildSceneContext"
 
 import type { MnemeonaProject } from "@/types/project"
 
@@ -14,9 +14,6 @@ const STORAGE_KEY =
 
 const CONTINUE_WRITING_TOKENS_KEY =
   "mnemeona-ai-continue-writing-tokens"
-
-const SCENE_AI_CONTEXT_PREFIX =
-  "mnemeona-ai-scene-context:"
 
 const DEFAULT_CONTINUE_WRITING_TOKENS =
   1024
@@ -141,46 +138,6 @@ export function normalizeContinueWritingTokens(
 }
 
 // --------------------------------------------------
-// Scene-Specific AI Context
-// --------------------------------------------------
-
-export function loadSceneAIContext(
-  sceneId: string,
-): string {
-  try {
-    return (
-      localStorage.getItem(
-        `${SCENE_AI_CONTEXT_PREFIX}${sceneId}`,
-      ) ?? ""
-    )
-  } catch {
-    return ""
-  }
-}
-
-export function saveSceneAIContext(
-  sceneId: string,
-  context: string,
-): void {
-  const key =
-    `${SCENE_AI_CONTEXT_PREFIX}${sceneId}`
-
-  try {
-    if (!context.trim()) {
-      localStorage.removeItem(key)
-      return
-    }
-
-    localStorage.setItem(
-      key,
-      context,
-    )
-  } catch {
-    // Ignore localStorage failures.
-  }
-}
-
-// --------------------------------------------------
 // AI Settings Storage
 // --------------------------------------------------
 
@@ -244,28 +201,14 @@ export function buildAIContext(
     project.storySummary?.trim() ||
     "No story summary has been generated yet."
 
-  const sceneAIContext =
-    loadSceneAIContext(
-      activeScene.id,
-    ).trim()
-
   return `STORY SO FAR:
 
 ${storySummary}
 
 CURRENT STORY CONTEXT:
 
-${formattedContext}${
-    sceneAIContext
-      ? `
-
-SCENE-SPECIFIC AUTHOR INSTRUCTIONS:
-
-${sceneAIContext}`
-      : ""
-  }`
+${formattedContext}`
 }
-
 // --------------------------------------------------
 // Scene Text Extraction
 // --------------------------------------------------
