@@ -27,10 +27,6 @@ import {
   loadContinueWritingLength,
 } from "./components/ai/aiservice/aiService"
 
-import {
-  useAITokenCount,
-} from "./components/ai/aiservice/useAITokenCount"
-
 type Workspace =
   | "manuscript"
   | "characters"
@@ -75,8 +71,16 @@ export default function App() {
 
   /*
    * Keep the response-token setting in App as well as
-   * AIContextPanel so the token calculation can continue
-   * even when the panel is closed.
+   * AIContextPanel so the setting remains synchronized
+   * while the application is mounted.
+   *
+   * IMPORTANT:
+   * App no longer mounts useAITokenCount.
+   *
+   * Token counting must not be part of the application's
+   * initial render/boot path. AIContextPanel is responsible
+   * for requesting token calculations when the AI Context
+   * interface is actually opened.
    */
   const [
     continueWritingLength,
@@ -86,36 +90,8 @@ export default function App() {
   )
 
   /*
-   * The token calculation is deliberately mounted here,
-   * rather than inside AIContextPanel.
-   *
-   * Therefore:
-   *
-   *   Open panel
-   *       ↓
-   *   token calculation starts
-   *       ↓
-   *   close panel
-   *       ↓
-   *   calculation CONTINUES
-   *
-   * App remains mounted for the whole application lifetime.
-   */
-  const {
-    isCalculating:
-      isTokenCountCalculating,
-    isApproximate:
-      isTokenCountApproximate,
-  } = useAITokenCount({
-    project,
-    activeScene,
-    responseTokens:
-      continueWritingLength,
-  })
-
-  /*
-   * If the response length is changed from AIContextPanel,
-   * keep App's copy synchronized.
+   * Keep App's copy synchronized when the response length
+   * is changed from AIContextPanel.
    *
    * The storage event does not fire in the same tab, so the
    * custom event lets the two components communicate locally.
@@ -140,6 +116,16 @@ export default function App() {
       )
     }
   }, [])
+
+  /*
+   * Keep the variable intentionally referenced so that the
+   * response-token setting remains part of App's state and
+   * synchronization lifecycle.
+   *
+   * Token counting itself is deliberately not performed here.
+   */
+  void continueWritingLength
+  void project
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -351,11 +337,7 @@ export default function App() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className={`relative gap-2 overflow-hidden transition-all duration-300 ${
-                    isTokenCountCalculating
-                      ? "bg-primary/10 text-primary"
-                      : ""
-                  }`}
+                  className="relative gap-2 overflow-hidden transition-all duration-300"
                   onClick={() =>
                     setShowAIContext(
                       true,
@@ -364,49 +346,13 @@ export default function App() {
                   disabled={
                     summaryGenerating
                   }
-                  aria-label={
-                    isTokenCountCalculating
-                      ? "AI Context is calculating token usage"
-                      : "Open AI Context"
-                  }
-                  title={
-                    isTokenCountCalculating
-                      ? "Calculating AI context tokens…"
-                      : "AI Context"
-                  }
+                  aria-label="Open AI Context"
+                  title="AI Context"
                 >
-                  {/* Animated background sweep */}
-
-                  {isTokenCountCalculating && (
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-0 -translate-x-full animate-[aiContextSweep_1.8s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-primary/10 to-transparent"
-                    />
-                  )}
-
                   <span className="relative flex items-center gap-2">
-                    <Sparkles
-                      className={`size-4 transition-all duration-300 ${
-                        isTokenCountCalculating
-                          ? "animate-[aiContextSparkle_1.4s_ease-in-out_infinite] text-primary"
-                          : ""
-                      }`}
-                    />
+                    <Sparkles className="size-4" />
 
                     AI Context
-
-                    {isTokenCountCalculating && (
-                      <span
-                        aria-hidden="true"
-                        className="flex items-center gap-0.5"
-                      >
-                        <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
-
-                        <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
-
-                        <span className="size-1 animate-bounce rounded-full bg-primary" />
-                      </span>
-                    )}
                   </span>
                 </Button>
 
@@ -496,41 +442,17 @@ export default function App() {
           <div className="relative z-10 flex h-[85vh] w-[min(1100px,90vw)] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
             <header className="flex h-14 shrink-0 items-center justify-between border-b px-5">
               <div className="flex items-center gap-2">
-                <div
-                  className={`flex size-8 items-center justify-center rounded-lg transition-all duration-300 ${
-                    isTokenCountCalculating
-                      ? "bg-primary/15"
-                      : "bg-primary/10"
-                  }`}
-                >
-                  <Sparkles
-                    className={`size-4 text-primary ${
-                      isTokenCountCalculating
-                        ? "animate-[aiContextSparkle_1.4s_ease-in-out_infinite]"
-                        : ""
-                    }`}
-                  />
+                <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
+                  <Sparkles className="size-4 text-primary" />
                 </div>
 
                 <div>
-                  <div className="flex items-center gap-2 text-sm font-medium">
+                  <div className="text-sm font-medium">
                     AI Context
-
-                    {isTokenCountCalculating && (
-                      <span className="flex items-center gap-0.5">
-                        <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
-
-                        <span className="size-1 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
-
-                        <span className="size-1 animate-bounce rounded-full bg-primary" />
-                      </span>
-                    )}
                   </div>
 
                   <div className="text-[11px] text-muted-foreground">
-                    {isTokenCountCalculating
-                      ? "Calculating token usage…"
-                      : "Context available to Mnemeona AI"}
+                    Context available to Mnemeona AI
                   </div>
                 </div>
               </div>
@@ -543,6 +465,7 @@ export default function App() {
                     false,
                   )
                 }
+                aria-label="Close AI Context"
               >
                 <X className="size-4" />
               </Button>

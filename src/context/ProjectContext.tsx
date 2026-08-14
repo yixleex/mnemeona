@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react"
 
@@ -15,7 +16,6 @@ import {
   calculateSceneWordCount,
   findScene,
 } from "./project/projectHelpers"
-
 import * as projectActions from "./project/projectActions"
 import * as manuscriptActions from "./manuscript/manuscriptActions"
 import * as characterActions from "./character/characterActions"
@@ -25,7 +25,6 @@ import * as eventActions from "./world/event/eventActions"
 import type { MnemeonaProject } from "@/types/project"
 
 import type { ProjectContextValue } from "./ProjectContext.types"
-
 import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
 import type { WorldEvent } from "@/types/world/event"
@@ -50,7 +49,13 @@ function normalizeProject(
 ): MnemeonaProject {
   return {
     ...project,
+    locations: project.locations ?? [],
     events: project.events ?? [],
+    characters: project.characters ?? [],
+    notes: project.notes ?? [],
+    storySummary: project.storySummary ?? "",
+    storySummaryFingerprint:
+      project.storySummaryFingerprint ?? "",
   }
 }
 
@@ -113,13 +118,6 @@ function buildStorySummaryFingerprint(
     }
   }
 
-  /*
-   * This is intentionally simple and deterministic.
-   *
-   * We do not need cryptographic security here.
-   * We only need to know whether the manuscript
-   * represented by the previous summary changed.
-   */
   return parts.join("\n")
 }
 
@@ -134,13 +132,21 @@ export function ProjectProvider({
 }) {
   const [project, setProject] =
     useState<MnemeonaProject>(() =>
-      normalizeProject(
-        createProject(),
-      ),
+      normalizeProject(createProject()),
     )
 
   const [summaryGenerating, setSummaryGenerating] =
     useState(false)
+
+  /**
+   * Prevents the automatic summary effect from
+   * running during the initial application mount.
+   *
+   * The first scene is automatically selected when
+   * a project is created, but that does NOT mean the
+   * user has entered/navigated to a new scene.
+   */
+  const hasMounted = useRef(false)
 
   // --------------------------------------------------
   // Active scene
@@ -160,9 +166,7 @@ export function ProjectProvider({
   // --------------------------------------------------
 
   const activeSceneWordCount =
-    calculateSceneWordCount(
-      activeScene,
-    )
+    calculateSceneWordCount(activeScene)
 
   const projectWordCount =
     calculateProjectWordCount(
@@ -177,8 +181,11 @@ export function ProjectProvider({
     async (
       targetProject: MnemeonaProject = project,
     ) => {
+      const normalizedProject =
+        normalizeProject(targetProject)
+
       const sceneId =
-        targetProject.settings.activeSceneId
+        normalizedProject.settings.activeSceneId
 
       if (!sceneId) {
         return
@@ -186,7 +193,7 @@ export function ProjectProvider({
 
       const targetScene =
         findScene(
-          targetProject.manuscript.acts,
+          normalizedProject.manuscript.acts,
           sceneId,
         )
 
@@ -194,26 +201,33 @@ export function ProjectProvider({
         return
       }
 
-      /*
-       * Calculate the current state of all scenes
-       * represented by the summary.
-       */
       const currentFingerprint =
         buildStorySummaryFingerprint(
-          targetProject,
+          normalizedProject,
           sceneId,
         )
 
-      /*
-       * If we already have a summary generated from
-       * exactly this manuscript state, there is
-       * nothing to do.
+      /**
+       * If the summary already represents exactly
+       * this manuscript state, there is nothing to do.
        */
       if (
-        targetProject.storySummary?.trim() &&
-        targetProject.storySummaryFingerprint ===
+        normalizedProject.storySummary.trim() &&
+        normalizedProject.storySummaryFingerprint ===
           currentFingerprint
       ) {
+        return
+      }
+
+      /**
+       * Do not generate a summary when there are no
+       * previous scenes yet.
+       *
+       * This is important for a brand-new project:
+       * the first scene does not have any story
+       * history that needs summarizing.
+       */
+      if (!currentFingerprint.trim()) {
         return
       }
 
@@ -222,7 +236,7 @@ export function ProjectProvider({
       try {
         const summary =
           await generateStorySummary(
-            targetProject,
+            normalizedProject,
             targetScene,
           )
 
@@ -231,9 +245,7 @@ export function ProjectProvider({
         }
 
         setProject((current) => ({
-          ...current,
-          events:
-            current.events ?? [],
+          ...normalizeProject(current),
           storySummary: summary,
           storySummaryFingerprint:
             currentFingerprint,
@@ -270,12 +282,6 @@ export function ProjectProvider({
 
   const loadProject = useCallback(
     () => {
-      /*
-       * Project loading is handled by projectActions.
-       *
-       * Normalize the loaded project so projects created
-       * before Events existed receive an empty events array.
-       */
       projectActions.loadProject(
         (loadedProject) => {
           setProject(
@@ -295,43 +301,44 @@ export function ProjectProvider({
 
   const saveProject = useCallback(
     async () => {
-      /*
-       * Normalize before saving so events are always
-       * represented in the persisted project, including
-       * projects originally created before Events existed.
-       */
       let projectToSave =
         normalizeProject(project)
 
       const sceneId =
-        project.settings.activeSceneId
+        projectToSave.settings.activeSceneId
 
       if (sceneId) {
         const scene =
           findScene(
-            project.manuscript.acts,
+            projectToSave.manuscript.acts,
             sceneId,
           )
 
         if (scene) {
           const fingerprint =
             buildStorySummaryFingerprint(
-              project,
+              projectToSave,
               sceneId,
             )
 
-          /*
-           * Only ask the AI to regenerate the summary
-           * when the scenes represented by it changed.
+          /**
+           * Only generate a summary if there are
+           * previous scenes to summarize.
            */
+          const hasPreviousScenes =
+            fingerprint.trim().length > 0
+
           const summaryIsCurrent =
             Boolean(
-              project.storySummary?.trim(),
+              projectToSave.storySummary.trim(),
             ) &&
-            project.storySummaryFingerprint ===
+            projectToSave.storySummaryFingerprint ===
               fingerprint
 
-          if (!summaryIsCurrent) {
+          if (
+            hasPreviousScenes &&
+            !summaryIsCurrent
+          ) {
             setSummaryGenerating(true)
 
             try {
@@ -367,10 +374,6 @@ export function ProjectProvider({
         }
       }
 
-      /*
-       * saveProject receives the complete project object.
-       * This includes project.events.
-       */
       await projectActions.saveProject(
         projectToSave,
       )
@@ -558,7 +561,7 @@ export function ProjectProvider({
         actId,
         fromIndex,
         toIndex,
-    ),
+        ),
     [],
   )
 
@@ -593,22 +596,27 @@ export function ProjectProvider({
   )
 
   // --------------------------------------------------
-  // Automatically update summary when scene changes
+  // Automatically update summary when the user
+  // navigates to another scene.
   // --------------------------------------------------
 
   useEffect(() => {
+    if (!hasMounted.current) {
+      hasMounted.current = true
+      return
+    }
+
     if (!activeSceneId) {
       return
     }
 
     void updateStorySummary(project)
 
-    // We intentionally only trigger when the
-    // selected scene changes.
-    //
-    // The fingerprint check inside updateStorySummary
-    // determines whether an AI request is actually
-    // necessary.
+    // The effect intentionally only depends on the
+    // selected scene. The fingerprint check inside
+    // updateStorySummary determines whether an AI
+    // request is actually necessary.
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSceneId])
 
@@ -817,6 +825,7 @@ export function ProjectProvider({
 
       summaryGenerating,
       updateStorySummary,
+
       setActiveScene,
 
       createNewProject,
@@ -869,7 +878,6 @@ export function ProjectProvider({
       project,
       activeSceneId,
       activeScene,
-
       projectWordCount,
       activeSceneWordCount,
 
