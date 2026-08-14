@@ -6,8 +6,8 @@ import type { Scene } from "@/types/manuscript"
 import type { WorldEventMention } from "@/types/aicontext"
 
 /**
- * Detects world event names mentioned in
- * the text of a scene.
+ * Detects world event names and aliases mentioned
+ * in the text of a scene.
  *
  * Detection searches both:
  *
@@ -40,37 +40,74 @@ export function detectWorldEventMentions(
     []
 
   for (const event of events) {
-    const name =
-      event.name.trim()
+    const candidates = [
+      {
+        text: event.name,
+        source: "name" as const,
+      },
+      ...(event.aliases ?? []).map(
+        (alias) => ({
+          text: alias,
+          source: "alias" as const,
+        }),
+      ),
+    ]
 
-    if (!name) {
-      continue
+    /*
+     * Prevent the same event from being detected
+     * multiple times if its name and/or aliases
+     * are mentioned more than once.
+     */
+    let eventDetected = false
+
+    for (const candidate of candidates) {
+      const candidateText =
+        candidate.text?.trim()
+
+      if (!candidateText) {
+        continue
+      }
+
+      const normalizedCandidate =
+        normalizeText(
+          candidateText,
+        )
+
+      if (!normalizedCandidate) {
+        continue
+      }
+
+      if (
+        containsPhrase(
+          normalizedText,
+          normalizedCandidate,
+        )
+      ) {
+        mentions.push({
+          eventId: event.id,
+
+          matchedText:
+            candidateText,
+
+          confidence: 1,
+
+          source:
+            candidate.source,
+        })
+
+        eventDetected = true
+
+        /*
+         * Once the event has been detected,
+         * there is no reason to check its other
+         * aliases.
+         */
+        break
+      }
     }
 
-    const normalizedName =
-      normalizeText(name)
-
-    if (!normalizedName) {
+    if (eventDetected) {
       continue
-    }
-
-    if (
-      containsPhrase(
-        normalizedText,
-        normalizedName,
-      )
-    ) {
-      mentions.push({
-        eventId:
-          event.id,
-
-        matchedText:
-          name,
-
-        confidence: 1,
-
-        source: "name",
-      })
     }
   }
 
@@ -145,6 +182,14 @@ function normalizeText(
 
 /**
  * Matches a phrase as a whole phrase.
+ *
+ * This is intentionally phrase-based so aliases
+ * such as:
+ *
+ * "The Great War of 1247"
+ *
+ * are detected as a complete alias rather than
+ * individual words.
  */
 function containsPhrase(
   text: string,

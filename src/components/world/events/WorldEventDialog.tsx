@@ -91,21 +91,41 @@ export function WorldEventDialog({
     EMPTY_EVENT,
   )
 
+  /*
+   * Keep aliases as a raw textarea value while editing.
+   *
+   * This is important because trimming the value during every
+   * onChange removes the trailing space when the user presses
+   * the spacebar.
+   */
+  const [
+    aliasesText,
+    setAliasesText,
+  ] = useState("")
+
   const isEditing =
     Boolean(event)
 
   useEffect(() => {
     if (event) {
+      const aliases =
+        event.aliases ?? []
+
       setForm({
         ...event,
-        aliases:
-          event.aliases ?? [],
+        aliases,
       })
+
+      setAliasesText(
+        aliases.join("\n"),
+      )
     } else {
       setForm({
         ...EMPTY_EVENT,
         aliases: [],
       })
+
+      setAliasesText("")
     }
   }, [event, open])
 
@@ -133,43 +153,59 @@ export function WorldEventDialog({
       return
     }
 
-    const aliases = Array.from(
-      new Set(
-        form.aliases
-          .map(
-            (alias) =>
-              alias.trim(),
-          )
-          .filter(Boolean)
-          .filter(
-            (alias) =>
-              alias.toLocaleLowerCase() !==
-              name.toLocaleLowerCase(),
-          ),
-      ),
-    )
+    /*
+     * Only normalize aliases when the form is submitted.
+     *
+     * This allows spaces to be freely typed while editing.
+     */
+    const aliases =
+      Array.from(
+        new Set(
+          aliasesText
+            .split(/\r?\n/)
+            .map(
+              (alias) =>
+                alias.trim(),
+            )
+            .filter(Boolean)
+            .filter(
+              (alias) =>
+                alias.toLocaleLowerCase() !==
+                name.toLocaleLowerCase(),
+            ),
+        ),
+      )
 
     onCreate({
       ...form,
+
       name,
+
       aliases,
+
       description:
         form.description.trim(),
+
       date:
         form.date?.trim() ||
         undefined,
+
       locationId:
         form.locationId?.trim() ||
         undefined,
+
       significance:
         form.significance?.trim() ||
         undefined,
+
       history:
         form.history?.trim() ||
         undefined,
+
       consequences:
         form.consequences?.trim() ||
         undefined,
+
       secrets:
         form.secrets?.trim() ||
         undefined,
@@ -178,27 +214,6 @@ export function WorldEventDialog({
 
   const handleClose = () => {
     onOpenChange(false)
-  }
-
-  const aliasesText =
-    form.aliases.join("\n")
-
-  const handleAliasesChange = (
-    value: string,
-  ) => {
-    const aliases =
-      value
-        .split(/\r?\n/)
-        .map(
-          (alias) =>
-            alias.trim(),
-        )
-        .filter(Boolean)
-
-    updateField(
-      "aliases",
-      aliases,
-    )
   }
 
   return (
@@ -263,7 +278,7 @@ export function WorldEventDialog({
               id="event-aliases"
               value={aliasesText}
               onChange={(event) =>
-                handleAliasesChange(
+                setAliasesText(
                   event.target.value,
                 )
               }
@@ -276,9 +291,8 @@ export function WorldEventDialog({
             <p className="text-xs text-muted-foreground">
               Add alternative names or ways this
               event may be referred to. Use one
-              alias per line. These aliases will
-              also be used for the AI to detect the
-              event.
+              alias per line. Multi-word aliases
+              are supported.
             </p>
           </div>
 
