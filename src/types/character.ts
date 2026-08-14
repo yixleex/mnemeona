@@ -16,6 +16,7 @@ export interface Character {
   personality: string
   appearance: string
   background: string
+  age: string
 
   goals: string
   fears: string

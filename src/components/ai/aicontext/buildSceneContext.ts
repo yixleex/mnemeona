@@ -330,6 +330,14 @@ function formatCharacter(
     )
   }
 
+  if (
+    character.age?.trim()
+  ) {
+    details.push(
+      `Age: ${character.age.trim()}`,
+    )
+  }
+
   addDetail(
     details,
     "Summary",

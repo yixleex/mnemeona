@@ -532,6 +532,22 @@ function CharacterEditor({
         />
       </CharacterSection>
 
+      {/* Age */}
+      <CharacterSection
+        title="Age"
+        description="How old is the character"
+      >
+        <CharacterInput
+          value={character.age}
+          onChange={(value) =>
+            onUpdate({
+              age: value,
+            })
+          }
+          placeholder="19"
+        />
+      </CharacterSection>
+
       {/* Personality */}
       <CharacterSection
         title="Personality"
@@ -794,6 +810,27 @@ function CharacterTextarea({
       }
       placeholder={placeholder}
       className="min-h-24 w-full resize-y rounded-xl border bg-background px-4 py-3 text-sm leading-6 outline-none transition placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
+    />
+  )
+}
+
+function CharacterInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+}) {
+  return (
+    <input
+      value={value}
+      onChange={(event) =>
+        onChange(event.target.value)
+      }
+      placeholder={placeholder}
+      className="h-9 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring"
     />
   )
 }
