@@ -1,6 +1,7 @@
 import type { Scene } from "./manuscript"
 import type { Character } from "./character"
 import type { Location } from "./world/location"
+import type { WorldEvent } from "./world/event"
 
 // --------------------------------------------------
 // Character Mentions
@@ -28,6 +29,20 @@ export interface LocationMention {
   confidence: number
 
   source: "name" | "alias"
+}
+
+// --------------------------------------------------
+// World Event Mentions
+// --------------------------------------------------
+
+export interface WorldEventMention {
+  eventId: string
+
+  matchedText: string
+
+  confidence: number
+
+  source: "name"
 }
 
 // --------------------------------------------------
@@ -62,6 +77,11 @@ export interface StoryContext {
   locations: Location[]
 
   detectedLocations: LocationMention[]
+
+  // World Events
+  events: WorldEvent[]
+
+  detectedEvents: WorldEventMention[]
 }
 
 // --------------------------------------------------
@@ -80,6 +100,10 @@ export interface FormattedStoryContext {
   locationCount: number
 
   detectedLocationCount: number
+
+  eventCount: number
+
+  detectedEventCount: number
 
   estimatedTokens: number
 }

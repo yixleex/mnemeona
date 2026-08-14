@@ -1,10 +1,10 @@
 import {
   Eye,
-  Link2,
   MapPin,
   MessageSquare,
   Sparkles,
   Users,
+  CalendarDays,
 } from "lucide-react"
 
 import {
@@ -164,6 +164,7 @@ export function AIContextPanel({
       activeScene,
       project.characters,
       project.locations,
+      project.events,
     )
 
   const formatted =
@@ -432,7 +433,7 @@ export function AIContextPanel({
               <p className="mt-2 text-xs text-muted-foreground">
                 This context is saved directly to the scene. It is
                 included in Formatted AI Context and is also searched
-                for character and location references.
+                for character, location, and world event references.
               </p>
             </div>
           </section>
@@ -646,7 +647,7 @@ export function AIContextPanel({
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <ContextStat
                 icon={Users}
                 label="Characters"
@@ -664,10 +665,10 @@ export function AIContextPanel({
               />
 
               <ContextStat
-                icon={Link2}
-                label="Relationships"
+                icon={CalendarDays}
+                label="World Events"
                 value={
-                  formatted.relationshipCount
+                  formatted.eventCount
                 }
               />
 
@@ -694,7 +695,7 @@ export function AIContextPanel({
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <DetectionCard
                 icon={Users}
                 label="Character References"
@@ -708,6 +709,14 @@ export function AIContextPanel({
                 label="Location References"
                 value={
                   formatted.detectedLocationCount
+                }
+              />
+
+              <DetectionCard
+                icon={CalendarDays}
+                label="World Event References"
+                value={
+                  formatted.detectedEventCount
                 }
               />
             </div>

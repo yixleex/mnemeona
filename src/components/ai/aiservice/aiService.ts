@@ -190,6 +190,7 @@ export function buildAIContext(
       activeScene,
       project.characters,
       project.locations,
+      project.events
     )
 
   const formattedContext =

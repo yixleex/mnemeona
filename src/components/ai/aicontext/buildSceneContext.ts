@@ -1,5 +1,6 @@
 import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
+import type { WorldEvent } from "@/types/world/event"
 import type { Scene } from "@/types/manuscript"
 
 import type {
@@ -15,6 +16,10 @@ import {
   buildLocationContext,
 } from "./world/location/locationContext"
 
+import {
+  buildWorldEventContext,
+} from "./world/event/worldEventContext"
+
 /**
  * Builds the structured AI context for a scene.
  *
@@ -27,6 +32,7 @@ export function buildSceneContext(
   scene: Scene,
   characters: Character[],
   locations: Location[],
+  events: WorldEvent[],
 ): StoryContext {
   const characterContext =
     buildCharacterContext(
@@ -38,6 +44,12 @@ export function buildSceneContext(
     buildLocationContext(
       scene,
       locations,
+    )
+
+  const eventContext =
+    buildWorldEventContext(
+      scene,
+      events,
     )
 
   return {
@@ -57,6 +69,12 @@ export function buildSceneContext(
 
     detectedLocations:
       locationContext.detectedLocations,
+
+    events:
+      eventContext.events,
+
+    detectedEvents:
+      eventContext.detectedEvents,
   }
 }
 
@@ -65,12 +83,10 @@ export function buildSceneContext(
  * text suitable for an AI prompt.
  *
  * Detection results are intentionally NOT
- * included in the formatted prompt.
+ * dumped into the prompt as raw metadata.
  *
- * detectedCharacters and detectedLocations
- * are internal metadata used to determine
- * what context should be included and are
- * still available on StoryContext for the UI.
+ * Instead, detected entities determine which
+ * worldbuilding records become relevant.
  */
 export function formatStoryContext(
   context: StoryContext,
@@ -148,10 +164,31 @@ export function formatStoryContext(
     sections.push(
       [
         "## Locations",
-
         "",
-
         locationSections.join(
+          "\n\n",
+        ),
+      ].join("\n"),
+    )
+  }
+
+  // --------------------------------------------------
+  // World Events
+  // --------------------------------------------------
+
+  if (
+    context.events.length > 0
+  ) {
+    const eventSections =
+      context.events.map(
+        formatWorldEvent,
+      )
+
+    sections.push(
+      [
+        "## World Events",
+        "",
+        eventSections.join(
           "\n\n",
         ),
       ].join("\n"),
@@ -173,9 +210,7 @@ export function formatStoryContext(
     sections.push(
       [
         "## Characters",
-
         "",
-
         characterSections.join(
           "\n\n",
         ),
@@ -217,9 +252,7 @@ export function formatStoryContext(
 
           return [
             `### ${leftName} → ${rightName}`,
-
             `Type: ${relationship.type}`,
-
             `Description: ${relationship.description}`,
           ].join("\n")
         },
@@ -228,9 +261,7 @@ export function formatStoryContext(
     sections.push(
       [
         "## Character Relationships",
-
         "",
-
         relationshipSections.join(
           "\n\n",
         ),
@@ -258,6 +289,12 @@ export function formatStoryContext(
 
     detectedLocationCount:
       context.detectedLocations.length,
+
+    eventCount:
+      context.events.length,
+
+    detectedEventCount:
+      context.detectedEvents.length,
 
     estimatedTokens:
       estimateTokens(text),
@@ -411,6 +448,61 @@ function formatLocation(
   return details.join("\n")
 }
 
+/**
+ * Formats an individual world event.
+ */
+function formatWorldEvent(
+  event: WorldEvent,
+): string {
+  const details: string[] = []
+
+  details.push(
+    `### ${event.name}`,
+  )
+
+  details.push(
+    `Type: ${event.type}`,
+  )
+
+  addDetail(
+    details,
+    "Description",
+    event.description,
+  )
+
+  addDetail(
+    details,
+    "Date",
+    event.date,
+  )
+
+  addDetail(
+    details,
+    "Significance",
+    event.significance,
+  )
+
+  addDetail(
+    details,
+    "History",
+    event.history,
+  )
+
+  addDetail(
+    details,
+    "Consequences",
+    event.consequences,
+  )
+
+  addDetail(
+    details,
+    "Secrets",
+    event.secrets,
+  )
+
+  return details.join("\n")
+}
+
 function addDetail(
   sections: string[],
   label: string,
@@ -427,9 +519,6 @@ function addDetail(
 
 /**
  * Rough token estimation.
- *
- * Actual token counts depend on the model
- * and tokenizer being used.
  */
 function estimateTokens(
   text: string,
