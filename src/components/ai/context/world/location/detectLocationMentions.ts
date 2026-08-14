@@ -10,6 +10,9 @@ import type { LocationMention } from "./locationContext"
  *
  * This does not modify the scene.
  * It only reports possible location references.
+ *
+ * Detection is performed locally and synchronously.
+ * No AI request is made.
  */
 export function detectLocationMentions(
   scene: Scene,
@@ -38,10 +41,19 @@ export function detectLocationMentions(
       continue
     }
 
+    const normalizedName =
+      normalizeText(name)
+
+    if (
+      !normalizedName
+    ) {
+      continue
+    }
+
     if (
       containsPhrase(
         normalizedText,
-        normalizeText(name),
+        normalizedName,
       )
     ) {
       mentions.push({
@@ -81,7 +93,7 @@ function extractSceneText(
 function walkContent(
   node: JSONContent,
   parts: string[],
-) {
+): void {
   if (
     typeof node.text ===
     "string"
@@ -103,6 +115,10 @@ function walkContent(
 
 /**
  * Normalizes text before matching.
+ *
+ * Location matching is:
+ * - case-insensitive
+ * - whitespace-insensitive
  */
 function normalizeText(
   text: string,
@@ -116,13 +132,19 @@ function normalizeText(
 /**
  * Matches a phrase as a whole phrase.
  *
+ * For example:
+ *
  * "Blackwater Pass" matches:
  *
  * "They entered Blackwater Pass."
  *
  * but does not match:
  *
- * "Blackwater Passage"
+ * "They entered Blackwater Passage."
+ *
+ * It also handles punctuation and possessives:
+ *
+ * "Blackwater Pass's entrance"
  */
 function containsPhrase(
   text: string,
@@ -133,9 +155,8 @@ function containsPhrase(
   }
 
   const escaped =
-    phrase.replace(
-      /[.*+?^${}()|[\]\\]/g,
-      "\\$&",
+    escapeRegExp(
+      phrase,
     )
 
   const pattern =
@@ -144,5 +165,20 @@ function containsPhrase(
       "iu",
     )
 
-  return pattern.test(text)
+  return pattern.test(
+    text,
+  )
+}
+
+/**
+ * Escapes a string so it can safely be
+ * inserted into a regular expression.
+ */
+function escapeRegExp(
+  value: string,
+): string {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  )
 }
