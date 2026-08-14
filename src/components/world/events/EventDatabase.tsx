@@ -21,8 +21,8 @@ import type {
 } from "@/types/world/event"
 
 import {
-  NewEventDialog,
-} from "./NewEventDialog"
+  WorldEventDialog,
+} from "./WorldEventDialog"
 
 interface EventDatabaseProps {
   onClose?: () => void
@@ -180,6 +180,7 @@ export function EventDatabase({
       addEvent({
         name: event.name,
         type: event.type,
+        aliases: event.aliases,
         description:
           event.description,
         date: event.date,
@@ -475,7 +476,7 @@ export function EventDatabase({
         </div>
       </div>
 
-      <NewEventDialog
+      <WorldEventDialog
         open={dialogOpen}
         onOpenChange={
           setDialogOpen

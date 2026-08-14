@@ -65,6 +65,7 @@ const EVENT_TYPES: WorldEventType[] = [
 const EMPTY_EVENT: WorldEvent = {
   id: "",
   name: "",
+  aliases: [],
   type: "Historical",
   description: "",
   date: "",
@@ -77,7 +78,7 @@ const EMPTY_EVENT: WorldEvent = {
   updatedAt: "",
 }
 
-export function NewEventDialog({
+export function WorldEventDialog({
   open,
   onOpenChange,
   onCreate,
@@ -97,10 +98,13 @@ export function NewEventDialog({
     if (event) {
       setForm({
         ...event,
+        aliases:
+          event.aliases ?? [],
       })
     } else {
       setForm({
         ...EMPTY_EVENT,
+        aliases: [],
       })
     }
   }, [event, open])
@@ -129,13 +133,31 @@ export function NewEventDialog({
       return
     }
 
+    const aliases = Array.from(
+      new Set(
+        form.aliases
+          .map(
+            (alias) =>
+              alias.trim(),
+          )
+          .filter(Boolean)
+          .filter(
+            (alias) =>
+              alias.toLocaleLowerCase() !==
+              name.toLocaleLowerCase(),
+          ),
+      ),
+    )
+
     onCreate({
       ...form,
       name,
+      aliases,
       description:
         form.description.trim(),
       date:
-        form.date?.trim() || undefined,
+        form.date?.trim() ||
+        undefined,
       locationId:
         form.locationId?.trim() ||
         undefined,
@@ -156,6 +178,27 @@ export function NewEventDialog({
 
   const handleClose = () => {
     onOpenChange(false)
+  }
+
+  const aliasesText =
+    form.aliases.join("\n")
+
+  const handleAliasesChange = (
+    value: string,
+  ) => {
+    const aliases =
+      value
+        .split(/\r?\n/)
+        .map(
+          (alias) =>
+            alias.trim(),
+        )
+        .filter(Boolean)
+
+    updateField(
+      "aliases",
+      aliases,
+    )
   }
 
   return (
@@ -207,6 +250,36 @@ export function NewEventDialog({
               placeholder="The Battle of Greyhaven"
               autoFocus
             />
+          </div>
+
+          {/* Aliases */}
+
+          <div className="space-y-2">
+            <Label htmlFor="event-aliases">
+              Aliases
+            </Label>
+
+            <Textarea
+              id="event-aliases"
+              value={aliasesText}
+              onChange={(event) =>
+                handleAliasesChange(
+                  event.target.value,
+                )
+              }
+              placeholder={
+                "The Battle of Greyhaven\nBattle of Greyhaven\nThe Greyhaven Battle\nGreyhaven"
+              }
+              rows={4}
+            />
+
+            <p className="text-xs text-muted-foreground">
+              Add alternative names or ways this
+              event may be referred to. Use one
+              alias per line. These aliases will
+              also be used for the AI to detect the
+              event.
+            </p>
           </div>
 
           {/* Type / Date */}
