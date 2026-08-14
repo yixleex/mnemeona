@@ -1,4 +1,5 @@
 import {
+  Calculator,
   Eye,
   MapPin,
   MessageSquare,
@@ -38,6 +39,139 @@ interface AIContextPanelProps {
   ) => void
 }
 
+// --------------------------------------------------
+// Local Gemma 3 Estimate
+// --------------------------------------------------
+
+/**
+ * Extracts the actual prose from the current scene.
+ *
+ * This is intentionally local-only. It never contacts Ollama.
+ */
+function extractSceneText(
+  scene: {
+    content?: unknown
+  } | null,
+): string {
+  if (!scene?.content) {
+    return ""
+  }
+
+  const extractNode = (
+    node: unknown,
+  ): string => {
+    if (
+      !node ||
+      typeof node !== "object"
+    ) {
+      return ""
+    }
+
+    const current =
+      node as {
+        text?: string
+        content?: unknown[]
+      }
+
+    const parts: string[] = []
+
+    if (
+      typeof current.text ===
+      "string"
+    ) {
+      parts.push(
+        current.text,
+      )
+    }
+
+    if (
+      Array.isArray(
+        current.content,
+      )
+    ) {
+      for (
+        const child of current.content
+      ) {
+        const childText =
+          extractNode(child)
+
+        if (childText) {
+          parts.push(
+            childText,
+          )
+        }
+      }
+    }
+
+    return parts.join(" ")
+  }
+
+  return extractNode(
+    scene.content,
+  ).trim()
+}
+
+/**
+ * Local-only Gemma 3 token estimate.
+ *
+ * Gemma 3 uses a 262k SentencePiece tokenizer. A character-based
+ * estimate can never exactly reproduce it, but ~3.5 characters/token
+ * is a more useful approximation for normal prose than the old
+ * generic 4 characters/token rule.
+ *
+ * The +10 accounts for a small amount of prompt/chat formatting
+ * overhead.
+ *
+ * IMPORTANT:
+ * This function never calls Ollama and therefore uses no AI/GPU.
+ */
+function estimateTokens(
+  text: string,
+): number {
+  const trimmed =
+    text.trim()
+
+  if (!trimmed) {
+    return 0
+  }
+
+  return (
+    Math.ceil(
+      trimmed.length /
+        3.5,
+    ) + 10
+  )
+}
+
+interface EstimatedPromptParts {
+  formattedContext: string
+  sceneText: string
+}
+
+/**
+ * Builds the local-only text used for the displayed estimate.
+ *
+ * The actual scene text is deliberately included because it is
+ * part of the prompt sent to the model.
+ */
+function buildEstimatedPromptText({
+  formattedContext,
+  sceneText,
+}: EstimatedPromptParts): string {
+  return [
+    formattedContext,
+    sceneText
+      ? `CURRENT SCENE TEXT:\n${sceneText}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+// --------------------------------------------------
+// Panel
+// --------------------------------------------------
+
 export function AIContextPanel({
   onClose,
   onTokenCalculationChange,
@@ -56,7 +190,7 @@ export function AIContextPanel({
   )
 
   /*
-   * Additional Context now comes directly from the
+   * Additional Context comes directly from the
    * active Scene instead of localStorage.
    *
    * This means the value is part of the persisted
@@ -86,13 +220,16 @@ export function AIContextPanel({
   /*
    * IMPORTANT:
    *
-   * The actual token-count request lives outside React.
-   * Unmounting this component therefore does not cancel it.
+   * The actual token-count request does NOT start here.
+   *
+   * useAITokenCount only prepares the request. Ollama is contacted
+   * when calculateTokenCount() is explicitly called below.
    */
   const {
     tokenCount,
     isCalculating,
     isApproximate,
+    calculateTokenCount,
   } = useAITokenCount({
     project,
     activeScene,
@@ -191,16 +328,33 @@ export function AIContextPanel({
       : formatted.text
 
   /*
-   * Keep the displayed token estimate synchronized with the
-   * actual formatted text, including the story summary and
-   * Additional Context.
+   * ------------------------------------------------
+   * Local Gemma 3 estimate
+   * ------------------------------------------------
+   *
+   * The old implementation only counted formattedText.
+   *
+   * The actual scene prose is also part of the AI prompt, so it
+   * must be included in the estimate.
+   *
+   * This calculation is completely local. It does NOT call Ollama.
    */
+  const sceneText =
+    extractSceneText(
+      activeScene,
+    )
+
+  const estimatedPromptText =
+    buildEstimatedPromptText({
+      formattedContext:
+        formattedText,
+      sceneText,
+    })
+
   const formattedEstimatedTokens =
-    formattedText.trim()
-      ? Math.ceil(
-          formattedText.length / 4,
-        )
-      : 0
+    estimateTokens(
+      estimatedPromptText,
+    )
 
   // --------------------------------------------------
   // Handlers
@@ -288,6 +442,15 @@ export function AIContextPanel({
             new Date().toISOString(),
         }),
       )
+    }
+
+  const handleCalculateTokens =
+    () => {
+      /*
+       * This is the ONLY place in this panel that starts
+       * the real Ollama token calculation.
+       */
+      calculateTokenCount()
     }
 
   return (
@@ -612,24 +775,87 @@ export function AIContextPanel({
                 </>
               ) : (
                 <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">
-                      Preparing prompt estimate…
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium">
+                        Model token count has not been requested
+                      </p>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={
+                        handleCalculateTokens
+                      }
+                      disabled={
+                        isCalculating
+                      }
+                      className="shrink-0"
+                    >
+                      <Calculator className="mr-2 h-4 w-4" />
+
+                      {isCalculating
+                        ? "Calculating…"
+                        : "Calculate tokens"}
+                    </Button>
+                  </div>
+
+                  <div className="mt-4 rounded-lg bg-muted/30 p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm text-muted-foreground">
+                        Estimated Tokens
+                      </span>
+
+                      <span className="font-medium">
+                        ≈{" "}
+                        {formattedEstimatedTokens.toLocaleString()}
+                        {" "}
+                        tokens
+                      </span>
+                    </div>
+
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Includes the formatted AI context and the actual
+                      scene text. This is a local estimate; press
+                      Calculate tokens for the selected Ollama model's
+                      actual count.
                     </p>
-
-                    <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600">
-                      Approximate
-                    </span>
                   </div>
 
-                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full w-1/3 animate-[tokenGauge_1.4s_ease-in-out_infinite] rounded-full bg-primary/70" />
-                  </div>
+                  {isCalculating && (
+                    <div className="mt-4">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div className="h-full w-1/3 animate-[tokenGauge_1.4s_ease-in-out_infinite] rounded-full bg-primary/70" />
+                      </div>
 
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Waiting for Ollama to calculate the actual token
-                    count…
-                  </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Waiting for Ollama to calculate the actual
+                        token count…
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {tokenCount && (
+                <div className="mt-5 border-t pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={
+                      handleCalculateTokens
+                    }
+                    disabled={
+                      isCalculating
+                    }
+                  >
+                    <Calculator className="mr-2 h-4 w-4" />
+
+                    {isCalculating
+                      ? "Calculating…"
+                      : "Recalculate tokens"}
+                  </Button>
                 </div>
               )}
             </div>
@@ -806,21 +1032,32 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  This is the exact context generated for the AI,
-                  including the project story summary and Additional
-                  Context.
+                  This is the context generated for the AI, including
+                  the project story summary, Additional Context, and
+                  current scene text.
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Eye className="h-4 w-4" />
 
-                {formattedEstimatedTokens.toLocaleString()} tokens
+                ≈{" "}
+                {formattedEstimatedTokens.toLocaleString()}
+                {" "}
+                tokens
               </div>
             </div>
 
             <pre className="max-h-[600px] overflow-auto whitespace-pre-wrap rounded-xl border bg-muted/30 p-5 font-mono text-xs leading-relaxed">
               {formattedText}
+
+              {sceneText && (
+                <>
+                  {"\n\n"}
+                  {"CURRENT SCENE TEXT:\n"}
+                  {sceneText}
+                </>
+              )}
             </pre>
           </section>
         </div>

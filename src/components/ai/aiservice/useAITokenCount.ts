@@ -1,5 +1,5 @@
 import {
-  useEffect,
+  useCallback,
   useMemo,
   useSyncExternalStore,
 } from "react"
@@ -32,8 +32,13 @@ interface UseAITokenCountOptions {
 /**
  * Persistent model-aware token gauge.
  *
- * The actual request lives in aiTokenCounter.ts, outside React.
- * Unmounting the component therefore does not cancel the request.
+ * IMPORTANT:
+ *
+ * This hook deliberately does NOT start a token-count request
+ * automatically.
+ *
+ * The actual Ollama calculation only starts when the caller
+ * explicitly invokes calculateTokenCount().
  */
 export function useAITokenCount({
   project,
@@ -74,17 +79,23 @@ export function useAITokenCount({
       [request],
     )
 
-  useEffect(() => {
-    if (!request) {
-      return
-    }
+  /*
+   * Do NOT calculate automatically.
+   *
+   * This function is intentionally exposed to the UI so that
+   * an expensive Ollama prompt evaluation only happens after
+   * the user explicitly asks for it.
+   */
+  const calculateTokenCount =
+    useCallback(() => {
+      if (!request) {
+        return
+      }
 
-    ensureAITokenCount(
-      request,
-    )
-  }, [
-    request,
-  ])
+      ensureAITokenCount(
+        request,
+      )
+    }, [request])
 
   const snapshot =
     useSyncExternalStore(
@@ -111,5 +122,7 @@ export function useAITokenCount({
     isApproximate:
       snapshot?.source ===
       "estimate",
+
+    calculateTokenCount,
   }
 }
