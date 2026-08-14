@@ -20,7 +20,6 @@ import { WorldDatabase } from "./components/world/WorldDatabase"
 import { AIChatPanel } from "./components/ai/aichatpanel/AIChatPanel"
 import { AIContextPanel } from "./components/ai/aicontextpanel/AIContextPanel"
 import { AISettingsDialog } from "./components/ai/aisettingsdialog/AISettingsDialog"
-
 import { useProject } from "./context/ProjectContext"
 
 import {
@@ -70,12 +69,24 @@ export default function App() {
   ] = useState(false)
 
   /*
+   * Tracks whether the AI Context token counter is currently
+   * waiting for Ollama.
+   *
+   * AIContextPanel owns the actual calculation. This state is
+   * only used so App can animate the button that opens the panel.
+   */
+  const [
+    isTokenCountCalculating,
+    setIsTokenCountCalculating,
+  ] = useState(false)
+
+  /*
    * Keep the response-token setting in App as well as
    * AIContextPanel so the setting remains synchronized
    * while the application is mounted.
    *
    * IMPORTANT:
-   * App no longer mounts useAITokenCount.
+   * App does not mount useAITokenCount.
    *
    * Token counting must not be part of the application's
    * initial render/boot path. AIContextPanel is responsible
@@ -140,7 +151,6 @@ export default function App() {
           <ProjectSwitcher />
 
           {/* Settings */}
-
           <Button
             variant="ghost"
             size="icon"
@@ -156,7 +166,6 @@ export default function App() {
         </header>
 
         {/* Search */}
-
         <div className="px-3 pb-2 pt-3">
           <Button
             variant="ghost"
@@ -173,7 +182,6 @@ export default function App() {
         </div>
 
         {/* Navigation */}
-
         <nav className="flex-1 overflow-y-auto px-3 py-2">
           <ManuscriptTree
             active={
@@ -195,7 +203,6 @@ export default function App() {
 
           <div className="space-y-1">
             {/* Characters */}
-
             <Button
               variant={
                 workspace ===
@@ -225,7 +232,6 @@ export default function App() {
             </Button>
 
             {/* World */}
-
             <Button
               variant={
                 workspace ===
@@ -251,7 +257,6 @@ export default function App() {
             </Button>
 
             {/* Notes */}
-
             <Button
               variant="ghost"
               className="w-full justify-start gap-2 text-muted-foreground"
@@ -264,7 +269,6 @@ export default function App() {
         </nav>
 
         {/* Word Count */}
-
         <div className="border-t px-4 py-3">
           <div className="text-xs text-muted-foreground">
             {projectWordCount.toLocaleString()}{" "}
@@ -310,7 +314,6 @@ export default function App() {
         ) : (
           <>
             {/* Editor Header */}
-
             <header className="flex h-14 shrink-0 items-center border-b px-6">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">
@@ -347,12 +350,44 @@ export default function App() {
                     summaryGenerating
                   }
                   aria-label="Open AI Context"
-                  title="AI Context"
+                  title={
+                    isTokenCountCalculating
+                      ? "AI Context — calculating tokens"
+                      : "AI Context"
+                  }
                 >
-                  <span className="relative flex items-center gap-2">
-                    <Sparkles className="size-4" />
+                  {/*
+                   * Animated sweep shown only while Ollama is
+                   * calculating the AI Context token count.
+                   *
+                   * pointer-events-none ensures the overlay never
+                   * interferes with clicking the button.
+                   */}
+                  {isTokenCountCalculating && (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 overflow-hidden rounded-md"
+                    >
+                      <span className="absolute inset-y-0 left-0 w-1/3 -translate-x-full animate-[aiContextSweep_1.25s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-primary/25 to-transparent" />
+                    </span>
+                  )}
+
+                  <span className="relative z-10 flex items-center gap-2">
+                    <Sparkles
+                      className={`size-4 ${
+                        isTokenCountCalculating
+                          ? "animate-[aiContextSparkle_1.1s_ease-in-out_infinite]"
+                          : ""
+                      }`}
+                    />
 
                     AI Context
+
+                    {isTokenCountCalculating && (
+                      <span className="text-[10px] font-medium text-primary/80">
+                        …
+                      </span>
+                    )}
                   </span>
                 </Button>
 
@@ -432,11 +467,11 @@ export default function App() {
             type="button"
             aria-label="Close AI Context"
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() =>
+            onClick={() => {
               setShowAIContext(
                 false,
               )
-            }
+            }}
           />
 
           <div className="relative z-10 flex h-[85vh] w-[min(1100px,90vw)] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
@@ -472,7 +507,11 @@ export default function App() {
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <AIContextPanel />
+              <AIContextPanel
+                onTokenCalculationChange={
+                  setIsTokenCountCalculating
+                }
+              />
             </div>
           </div>
         </div>
@@ -508,7 +547,6 @@ export default function App() {
           >
             <div className="flex flex-col items-center text-center">
               {/* Spinner */}
-
               <div className="mb-5 flex size-12 items-center justify-center rounded-full border-2 border-muted border-t-primary animate-spin">
                 <Sparkles className="size-5 text-primary" />
               </div>
@@ -538,11 +576,11 @@ export default function App() {
         {`
           @keyframes aiContextSweep {
             0% {
-              transform: translateX(-100%);
+              transform: translateX(-120%);
             }
 
             100% {
-              transform: translateX(200%);
+              transform: translateX(420%);
             }
           }
 

@@ -34,10 +34,14 @@ import { useAITokenCount } from "@/components/ai/aiservice/useAITokenCount"
 
 interface AIContextPanelProps {
   onClose?: () => void
+  onTokenCalculationChange?: (
+    isCalculating: boolean,
+  ) => void
 }
 
 export function AIContextPanel({
   onClose,
+  onTokenCalculationChange,
 }: AIContextPanelProps) {
   const {
     project,
@@ -95,9 +99,8 @@ export function AIContextPanel({
   /*
    * IMPORTANT:
    *
-   * This hook is persistent outside the panel lifecycle.
-   *
-   * Closing this panel does NOT abort the Ollama request.
+   * The actual token-count request lives outside React.
+   * Unmounting this component therefore does not cancel it.
    */
   const {
     tokenCount,
@@ -110,6 +113,21 @@ export function AIContextPanel({
       continueWritingLength,
     messages,
   })
+
+  /*
+   * Tell App whenever token calculation starts or finishes.
+   *
+   * App uses this to animate the AI Context button even though
+   * the token-counting logic itself remains owned by this panel.
+   */
+  useEffect(() => {
+    onTokenCalculationChange?.(
+      isCalculating,
+    )
+  }, [
+    isCalculating,
+    onTokenCalculationChange,
+  ])
 
   // --------------------------------------------------
   // Empty State
@@ -127,6 +145,7 @@ export function AIContextPanel({
               <h1 className="text-xl font-semibold">
                 AI Context
               </h1>
+
               <p className="text-sm text-muted-foreground">
                 No active scene selected.
               </p>
@@ -165,9 +184,8 @@ export function AIContextPanel({
     )
 
   /*
-   * The story summary belongs to the project rather than the
-   * scene context formatter. Add it to the displayed AI context
-   * here without changing the shared formatter.
+   * Story summary belongs to the project rather than the scene
+   * formatter, so it is added to the formatted AI context here.
    */
   const storySummary =
     project.storySummary?.trim() ?? ""
@@ -183,10 +201,7 @@ export function AIContextPanel({
 
   /*
    * Keep the displayed token estimate synchronized with the
-   * actual text shown above, including the story summary.
-   *
-   * This uses the same rough estimation approach as
-   * buildSceneContext.ts: approximately 1 token per 4 characters.
+   * actual formatted text, including the story summary.
    */
   const formattedEstimatedTokens =
     formattedText.trim()
@@ -281,7 +296,6 @@ export function AIContextPanel({
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
-
           {/* Continue AI Settings */}
           <section>
             <div className="rounded-xl border bg-card p-5">
@@ -771,6 +785,7 @@ export function AIContextPanel({
             0% {
               transform: translateX(-120%);
             }
+
             100% {
               transform: translateX(420%);
             }
