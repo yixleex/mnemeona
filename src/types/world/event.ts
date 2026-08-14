@@ -14,6 +14,7 @@ export type WorldEventType =
 export interface WorldEvent {
   id: string
   name: string
+  aliases: string[]
   type: WorldEventType
   description: string
 
