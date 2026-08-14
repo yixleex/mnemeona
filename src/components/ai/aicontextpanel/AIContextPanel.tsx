@@ -23,7 +23,6 @@ import {
   buildSceneContext,
   formatStoryContext,
 } from "@/components/ai/context/buildSceneContext"
-
 import {
   loadContinueWritingLength,
   loadSceneAIContext,
@@ -115,7 +114,6 @@ export function AIContextPanel({
   // --------------------------------------------------
   // Empty State
   // --------------------------------------------------
-
   if (!activeScene) {
     return (
       <div className="flex h-full flex-col">
@@ -129,7 +127,6 @@ export function AIContextPanel({
               <h1 className="text-xl font-semibold">
                 AI Context
               </h1>
-
               <p className="text-sm text-muted-foreground">
                 No active scene selected.
               </p>
@@ -166,6 +163,37 @@ export function AIContextPanel({
     formatStoryContext(
       context,
     )
+
+  /*
+   * The story summary belongs to the project rather than the
+   * scene context formatter. Add it to the displayed AI context
+   * here without changing the shared formatter.
+   */
+  const storySummary =
+    project.storySummary?.trim() ?? ""
+
+  const formattedText =
+    storySummary
+      ? [
+          "## Story Summary",
+          storySummary,
+          formatted.text,
+        ].join("\n\n")
+      : formatted.text
+
+  /*
+   * Keep the displayed token estimate synchronized with the
+   * actual text shown above, including the story summary.
+   *
+   * This uses the same rough estimation approach as
+   * buildSceneContext.ts: approximately 1 token per 4 characters.
+   */
+  const formattedEstimatedTokens =
+    formattedText.trim()
+      ? Math.ceil(
+          formattedText.length / 4,
+        )
+      : 0
 
   // --------------------------------------------------
   // Handlers
@@ -253,6 +281,7 @@ export function AIContextPanel({
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
+
           {/* Continue AI Settings */}
           <section>
             <div className="rounded-xl border bg-card p-5">
@@ -388,7 +417,6 @@ export function AIContextPanel({
                             ? "≈ "
                             : ""}
                           {tokenCount.totalTokens.toLocaleString()}
-
                           {tokenCount.contextLength
                             ? ` / ${tokenCount.contextLength.toLocaleString()}`
                             : ""}{" "}
@@ -608,7 +636,7 @@ export function AIContextPanel({
                 icon={MessageSquare}
                 label="Estimated Tokens"
                 value={
-                  formatted.estimatedTokens
+                  formattedEstimatedTokens
                 }
               />
             </div>
@@ -717,21 +745,20 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  This is the exact context generated for the AI.
-                  Scene prose is counted separately and is not duplicated
-                  here.
+                  This is the exact context generated for the AI,
+                  including the project story summary.
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Eye className="h-4 w-4" />
 
-                {formatted.estimatedTokens} tokens
+                {formattedEstimatedTokens.toLocaleString()} tokens
               </div>
             </div>
 
             <pre className="max-h-[600px] overflow-auto whitespace-pre-wrap rounded-xl border bg-muted/30 p-5 font-mono text-xs leading-relaxed">
-              {formatted.text}
+              {formattedText}
             </pre>
           </section>
         </div>
@@ -744,7 +771,6 @@ export function AIContextPanel({
             0% {
               transform: translateX(-120%);
             }
-
             100% {
               transform: translateX(420%);
             }
