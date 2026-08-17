@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import gc
 import importlib
 import json
 from pathlib import Path
 from typing import Any
+
+import torch
 
 from providers.base import ImageProvider
 
@@ -33,6 +36,8 @@ class ProviderRegistry:
             str,
             ImageProvider,
         ] = {}
+
+        self._loaded_provider_id: str | None = None
 
         self.discover()
 
@@ -101,10 +106,17 @@ class ProviderRegistry:
             )
         )
 
+    @property
+    def loaded_provider_id(
+        self,
+    ) -> str | None:
+        return self._loaded_provider_id
+
     def manifests(
         self,
     ) -> list[dict[str, Any]]:
         active = self.active_id
+        loaded = self._loaded_provider_id
 
         output: list[
             dict[str, Any]
@@ -149,6 +161,9 @@ class ProviderRegistry:
                     "installed": True,
                     "active": (
                         provider_id == active
+                    ),
+                    "loaded": (
+                        provider_id == loaded
                     ),
                 }
             )
@@ -271,6 +286,121 @@ class ProviderRegistry:
             provider_id
         )
 
+    def ensure_only_loaded(
+        self,
+        provider_id: str,
+    ) -> ImageProvider:
+        """
+        Ensure that ONLY the requested provider
+        is loaded.
+
+        This is the central VRAM safety mechanism.
+
+        If another provider is loaded, it is fully
+        unloaded before the requested provider is
+        loaded.
+        """
+
+        if provider_id not in self._manifests:
+            raise RuntimeError(
+                f"Unknown image provider: "
+                f"{provider_id}"
+            )
+
+        if (
+            self._loaded_provider_id
+            == provider_id
+        ):
+            return self.get(
+                provider_id
+            )
+
+        self.unload_all()
+
+        provider = self.get(
+            provider_id
+        )
+
+        self._loaded_provider_id = (
+            provider_id
+        )
+
+        return provider
+
+    def switch(
+        self,
+        provider_id: str,
+    ) -> dict[str, Any]:
+        """
+        Switch the active image provider.
+
+        The current provider is unloaded BEFORE
+        the new provider becomes active.
+
+        The new provider is intentionally not
+        loaded here. It will be lazy-loaded on
+        first generation.
+        """
+
+        if provider_id not in self._manifests:
+            available = ", ".join(
+                sorted(
+                    self._manifests
+                )
+            )
+
+            raise RuntimeError(
+                f"Image provider "
+                f"'{provider_id}' "
+                "is not installed. "
+                f"Available providers: "
+                f"{available or 'none'}"
+            )
+
+        provider_config = (
+            self._provider_config(
+                provider_id
+            )
+        )
+
+        if not provider_config.get(
+            "enabled",
+            True,
+        ):
+            raise RuntimeError(
+                f"Image provider "
+                f"'{provider_id}' "
+                "is disabled."
+            )
+
+        old_provider = (
+            self._loaded_provider_id
+        )
+
+        if old_provider != provider_id:
+            self.unload_all()
+
+        self.config[
+            "active_provider"
+        ] = provider_id
+
+        return {
+            "ok": True,
+            "active_provider": provider_id,
+            "previous_provider": old_provider,
+            "loaded_provider": (
+                self._loaded_provider_id
+            ),
+            "message": (
+                f"Switched image provider "
+                f"from "
+                f"{old_provider or 'none'} "
+                f"to {provider_id}. "
+                "The new model will be loaded "
+                "when it is first used."
+            ),
+        }
+
     def get_status(
         self,
     ) -> dict[str, Any]:
@@ -291,6 +421,9 @@ class ProviderRegistry:
 
         return {
             "active_provider": active_id,
+            "loaded_provider": (
+                self._loaded_provider_id
+            ),
             "providers": self.manifests(),
             "active_status": active_status,
         }
@@ -316,15 +449,64 @@ class ProviderRegistry:
         return provider.settings_schema()
 
     def unload_all(self) -> None:
-        for provider in list(
-            self._instances.values()
+        """
+        Fully unload every instantiated image
+        provider.
+
+        This deliberately clears provider instances
+        as well as calling their unload methods.
+
+        CUDA cleanup is performed after every provider
+        has been released.
+        """
+
+        for (
+            provider_id,
+            provider,
+        ) in list(
+            self._instances.items()
         ):
             try:
+                print(
+                    f"Unloading image provider "
+                    f"{provider_id}..."
+                )
+
                 provider.unload()
+
             except Exception as exc:
                 print(
-                    "Provider unload failed: "
-                    f"{exc}"
+                    "Provider unload failed "
+                    f"for {provider_id}: {exc}"
                 )
 
         self._instances.clear()
+
+        self._loaded_provider_id = None
+
+        # Release Python references.
+        gc.collect()
+
+        # Release PyTorch CUDA allocations.
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+
+            gc.collect()
+
+        print(
+            "All image providers unloaded "
+            "and CUDA cache cleared."
+        )

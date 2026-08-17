@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(
+    __file__
+).resolve().parents[1]
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -17,13 +19,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "lcm": {
             "enabled": True,
 
-            # Set this to wherever you install the model.
-            #
-            # You can also override it with:
-            #
-            # MNEMEONA_LCM_MODEL=/path/to/model
-            #
-            "model_path": "./models/LCM_Dreamshaper_v7",
+            "model_path": (
+                "./models/LCM_Dreamshaper_v7"
+            ),
 
             "device": "auto",
             "dtype": "float16",
@@ -36,11 +34,86 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "vae_tiling": True,
             },
         },
+
+        # These providers can be installed later.
+        #
+        # Keeping them disabled until their provider
+        # packages/checkpoints are installed prevents
+        # Mnemeona from trying to load them prematurely.
+
+        "sdxl_lightning": {
+            "enabled": False,
+
+            "model_path": (
+                "./models/SDXL-Lightning"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "guidance_scale": 0.0,
+                "attention_slicing": True,
+                "vae_slicing": True,
+                "vae_tiling": True,
+            },
+        },
+
+        "sdxl_hyper": {
+            "enabled": False,
+
+            "model_path": (
+                "./models/SDXL-Hyper"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "guidance_scale": 0.0,
+                "attention_slicing": True,
+                "vae_slicing": True,
+                "vae_tiling": True,
+            },
+        },
+
+        "flux_schnell": {
+            "enabled": False,
+
+            "model_path": (
+                "./models/FLUX.1-schnell"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "enable_cpu_offload": True,
+                "enable_vae_tiling": True,
+            },
+        },
+
+        "sd35_medium": {
+            "enabled": False,
+
+            "model_path": (
+                "./models/stable-diffusion-3.5-medium"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "enable_cpu_offload": True,
+            },
+        },
     },
 
     "gpu_coordination": {
         "enabled": True,
-        "ollama_url": "http://127.0.0.1:11434",
+        "ollama_url": (
+            "http://127.0.0.1:11434"
+        ),
         "reload_after_image": True,
         "timeout_seconds": 10,
     },
@@ -59,7 +132,11 @@ def config_path() -> Path:
             .resolve()
         )
 
-    return ROOT / "config" / "image-ai.json"
+    return (
+        ROOT
+        / "config"
+        / "image-ai.json"
+    )
 
 
 def _merge(
@@ -71,7 +148,10 @@ def _merge(
     for key, value in override.items():
         if (
             isinstance(value, dict)
-            and isinstance(result.get(key), dict)
+            and isinstance(
+                result.get(key),
+                dict,
+            )
         ):
             result[key] = _merge(
                 result[key],
@@ -96,10 +176,13 @@ def load_config() -> dict[str, Any]:
             "r",
             encoding="utf-8",
         ) as handle:
-            user_config = json.load(handle)
+            user_config = json.load(
+                handle
+            )
+
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            f"Invalid image AI configuration "
+            "Invalid image AI configuration "
             f"at {path}: {exc}"
         ) from exc
 
@@ -108,8 +191,9 @@ def load_config() -> dict[str, Any]:
         dict,
     ):
         raise RuntimeError(
-            f"Image AI configuration at "
-            f"{path} must contain a JSON object."
+            "Image AI configuration at "
+            f"{path} must contain "
+            "a JSON object."
         )
 
     config = _merge(
@@ -117,8 +201,8 @@ def load_config() -> dict[str, Any]:
         user_config,
     )
 
-    # Environment variables intentionally override
-    # configuration files.
+    # Environment variables intentionally
+    # override configuration files.
 
     lcm_model = os.getenv(
         "MNEMEONA_LCM_MODEL"
@@ -168,8 +252,8 @@ def resolve_model_path(
     Absolute paths are used unchanged.
 
     Relative paths are relative to the
-    mnemeona-image directory, NOT the shell's
-    current working directory.
+    mnemeona-image directory, NOT the
+    shell's current working directory.
     """
 
     path = Path(

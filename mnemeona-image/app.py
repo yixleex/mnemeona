@@ -9,7 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
-from core.config import load_config
+from core.config import (
+    load_config,
+    save_config,
+)
 from core.models import GenerationRequest
 from core.registry import ProviderRegistry
 from ollama_manager import OllamaGPUManager
@@ -17,7 +20,7 @@ from ollama_manager import OllamaGPUManager
 
 app = FastAPI(
     title="Mnemeona Image API",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 
@@ -67,7 +70,7 @@ class GenerateRequest(BaseModel):
     steps: int = Field(
         default=4,
         ge=1,
-        le=8,
+        le=30,
     )
 
     seed: int | None = None
@@ -79,20 +82,102 @@ class GenerateRequest(BaseModel):
     )
 
 
+class SwitchProviderRequest(BaseModel):
+    provider: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+
 def get_provider(
     provider_id: str | None,
 ):
     if provider_id:
-        return registry.get(
-            provider_id
+        return (
+            registry
+            .ensure_only_loaded(
+                provider_id
+            )
         )
 
-    return registry.get_active()
+    return (
+        registry
+        .ensure_only_loaded(
+            registry.active_id
+        )
+    )
 
 
 @app.get("/providers")
 def providers():
     return registry.get_status()
+
+
+@app.post("/providers/switch")
+def switch_provider(
+    request: SwitchProviderRequest,
+):
+    with _generation_lock:
+        try:
+            result = registry.switch(
+                request.provider
+            )
+
+            save_config(
+                _config
+            )
+
+            return {
+                **result,
+                "status": (
+                    registry
+                    .get_status()
+                ),
+            }
+
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
+
+
+@app.post(
+    "/providers/{provider_id}/unload"
+)
+def unload_provider(
+    provider_id: str,
+):
+    with _generation_lock:
+        try:
+            if provider_id not in (
+                registry._manifests
+            ):
+                raise RuntimeError(
+                    f"Unknown image provider: "
+                    f"{provider_id}"
+                )
+
+            registry.unload_all()
+
+            return {
+                "ok": True,
+                "provider": provider_id,
+                "loaded_provider": (
+                    registry
+                    .loaded_provider_id
+                ),
+                "status": (
+                    registry
+                    .get_status()
+                ),
+            }
+
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
 
 
 @app.get(
@@ -154,7 +239,9 @@ def health():
         "ok": True,
         "service": "mnemeona-image",
         "version": app.version,
-        "providers": registry.get_status(),
+        "providers": (
+            registry.get_status()
+        ),
         "ollama": ollama.status(),
     }
 
@@ -188,8 +275,13 @@ def generate(
                 .unload_for_image_generation()
             )
 
-            provider = get_provider(
+            provider_id = (
                 request.provider
+                or registry.active_id
+            )
+
+            provider = get_provider(
+                provider_id
             )
 
             result = provider.generate(
@@ -245,6 +337,31 @@ def generate(
                 registry.unload_all()
             finally:
                 ollama.restore_after_image_generation()
+
+
+@app.post("/unload")
+def unload_all():
+    with _generation_lock:
+        try:
+            registry.unload_all()
+
+            return {
+                "ok": True,
+                "message": (
+                    "All image models unloaded "
+                    "and GPU memory released."
+                ),
+                "status": (
+                    registry
+                    .get_status()
+                ),
+            }
+
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=str(exc),
+            ) from exc
 
 
 @app.on_event("shutdown")
