@@ -1,76 +1,60 @@
 #!/usr/bin/env bash
-
-if [ -z "${BASH_VERSION:-}" ]; then
-    echo "ERROR: Run this installer with Bash:"
-    echo
-    echo "  bash install.sh"
-    echo
-    exit 1
-fi
-
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/venv"
-MODEL_DIR="${SCRIPT_DIR}/models/LCM_Dreamshaper_v7"
-
-echo
-echo "============================================================"
-echo "       Mnemeona LCM DreamShaper v7 Installer"
-echo "============================================================"
-echo
-
-if ! command -v nvidia-smi >/dev/null 2>&1; then
-    echo "ERROR: nvidia-smi was not found."
-    echo
-    echo "Please install/configure your NVIDIA driver first."
-    exit 1
-fi
-
-echo "GPU:"
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-echo
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: python3 is required."
     exit 1
 fi
 
-echo "Python:"
-python3 --version
-echo
-
 if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)'; then
     echo "ERROR: Python 3.11 or newer is required."
     exit 1
 fi
 
-if ! python3 -c 'import venv' >/dev/null 2>&1; then
-    echo "ERROR: python3-venv is missing."
-    echo
-    echo "On Debian:"
-    echo
-    echo "  sudo apt install python3-venv"
-    exit 1
-fi
+echo
+echo "=========================================="
+echo " Mnemeona Image AI Installer"
+echo "=========================================="
+echo
 
-echo "Creating virtual environment..."
+#
+# Python virtual environment
+#
 
 if [ ! -d "${VENV_DIR}" ]; then
+    echo "Creating Python virtual environment..."
+
     python3 -m venv "${VENV_DIR}"
+else
+    echo "Python virtual environment already exists."
 fi
 
 source "${VENV_DIR}/bin/activate"
 
-python -m pip install --upgrade \
+#
+# Packaging tools
+#
+
+echo
+echo "Updating Python packaging tools..."
+
+python -m pip install \
+    --upgrade \
     pip \
     setuptools \
     wheel
 
+#
+# PyTorch
+#
+
 echo
-echo "============================================================"
-echo "Installing PyTorch CUDA"
-echo "============================================================"
+echo "=========================================="
+echo " Installing PyTorch CUDA"
+echo "=========================================="
 echo
 
 python -m pip install \
@@ -79,87 +63,54 @@ python -m pip install \
     torchaudio \
     --index-url https://download.pytorch.org/whl/cu128
 
-echo
-echo "Checking CUDA..."
-echo
-
-python - <<'PY'
-import torch
-
-print("PyTorch:", torch.__version__)
-print("CUDA build:", torch.version.cuda)
-print("CUDA available:", torch.cuda.is_available())
-
-if not torch.cuda.is_available():
-    raise SystemExit(
-        "ERROR: PyTorch cannot access your NVIDIA GPU."
-    )
-
-print("GPU:", torch.cuda.get_device_name(0))
-
-props = torch.cuda.get_device_properties(0)
-
-print(
-    "VRAM:",
-    round(
-        props.total_memory / 1024**3,
-        2,
-    ),
-    "GB",
-)
-PY
+#
+# Core API
+#
 
 echo
-echo "============================================================"
-echo "Installing Python dependencies"
-echo "============================================================"
+echo "=========================================="
+echo " Installing core API dependencies"
+echo "=========================================="
 echo
 
 python -m pip install \
-    -r "${SCRIPT_DIR}/requirements.txt"
+    "fastapi>=0.116" \
+    "uvicorn[standard]>=0.35" \
+    "pillow>=11.0" \
+    "python-multipart>=0.0.20"
+
+#
+# Install the initial image provider.
+#
 
 echo
-echo "============================================================"
-echo "Downloading LCM DreamShaper v7"
-echo "============================================================"
+echo "=========================================="
+echo " Installing LCM provider"
+echo "=========================================="
 echo
 
-mkdir -p "${MODEL_DIR}"
+"${SCRIPT_DIR}/install_provider.sh" lcm
 
 echo
-echo "Model:"
-echo "  SimianLuo/LCM_Dreamshaper_v7"
-echo
-echo "License:"
-echo "  MIT"
-echo
-echo "No Hugging Face login is required for this public model."
+echo "=========================================="
+echo " Mnemeona Image installation complete"
+echo "=========================================="
 echo
 
-python - <<PY
-from huggingface_hub import snapshot_download
-
-snapshot_download(
-    repo_id="SimianLuo/LCM_Dreamshaper_v7",
-    local_dir="${MODEL_DIR}",
-)
-PY
+echo "Image service:"
+echo "  ${SCRIPT_DIR}"
 
 echo
-echo "============================================================"
-echo "Installation complete"
-echo "============================================================"
-echo
-
 echo "Virtual environment:"
 echo "  ${VENV_DIR}"
-echo
 
-echo "Model:"
-echo "  ${MODEL_DIR}"
 echo
+echo "LCM model:"
+echo "  ${SCRIPT_DIR}/models/LCM_Dreamshaper_v7"
 
-echo "Next:"
 echo
-echo "  ./test_lcm.py"
+echo "Start the image server with:"
+echo
+echo "  source ${VENV_DIR}/bin/activate"
+echo "  python ${SCRIPT_DIR}/app.py"
 echo
