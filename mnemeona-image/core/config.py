@@ -35,14 +35,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
 
-        # These providers can be installed later.
-        #
-        # Keeping them disabled until their provider
-        # packages/checkpoints are installed prevents
-        # Mnemeona from trying to load them prematurely.
-
         "sdxl_lightning": {
-            "enabled": False,
+            "enabled": True,
 
             "model_path": (
                 "./models/SDXL-Lightning"
@@ -55,9 +49,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "guidance_scale": 0.0,
                 "attention_slicing": True,
                 "vae_slicing": True,
-                "vae_tiling": True,
-            },
+                "vae_tiling": True
+            }
         },
+
+        # These providers can be installed later.
+        #
+        # Keeping them disabled until their provider
+        # packages/checkpoints are installed prevents
+        # Mnemeona from trying to load them prematurely.
 
         "sdxl_hyper": {
             "enabled": False,

@@ -79,6 +79,7 @@ echo "Provider dependencies installed."
 case "${PROVIDER}" in
 
     lcm)
+
         MODEL_DIR="${MODELS_DIR}/LCM_Dreamshaper_v7"
         MODEL_REPO="SimianLuo/LCM_Dreamshaper_v7"
 
@@ -98,9 +99,6 @@ case "${PROVIDER}" in
 
         #
         # Install huggingface_hub explicitly.
-        # It is already listed in the LCM requirements,
-        # but installing it here makes the model installer
-        # self-contained.
         #
 
         python -m pip install \
@@ -164,7 +162,114 @@ PY
         echo "  ${MODEL_DIR}"
         ;;
 
+    sdxl_lightning)
+
+        MODEL_DIR="${MODELS_DIR}/SDXL-Lightning"
+
+        #
+        # We use a local Diffusers-compatible model
+        # so the image service does not need to contact
+        # an external service during generation.
+        #
+        # The model repository can be overridden with:
+        #
+        #   MNEMEONA_SDXL_LIGHTNING_REPO=...
+        #
+        MODEL_REPO="${MNEMEONA_SDXL_LIGHTNING_REPO:-ByteDance/SDXL-Lightning}"
+
+        echo
+        echo "=========================================="
+        echo " Installing SDXL Lightning"
+        echo "=========================================="
+        echo
+        echo "Hugging Face repository:"
+        echo "  ${MODEL_REPO}"
+        echo
+        echo "Local installation directory:"
+        echo "  ${MODEL_DIR}"
+        echo
+        echo "Target:"
+        echo "  SDXL Lightning"
+        echo "  4-step generation"
+        echo
+
+        mkdir -p "${MODELS_DIR}"
+
+        #
+        # Install huggingface_hub explicitly.
+        #
+
+        python -m pip install \
+            "huggingface_hub>=0.32"
+
+        #
+        # Check whether a complete local Diffusers
+        # installation already exists.
+        #
+
+        if [ -f "${MODEL_DIR}/model_index.json" ]; then
+
+            echo "SDXL Lightning model already exists."
+            echo
+            echo "Skipping download."
+            echo
+
+        else
+
+            echo "Downloading SDXL Lightning..."
+            echo
+            echo "This model may be several GB."
+            echo "The files will be stored locally."
+            echo
+
+            python - <<PY
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+
+model_dir = Path(r"""${MODEL_DIR}""")
+
+model_dir.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+snapshot_download(
+    repo_id="${MODEL_REPO}",
+    local_dir=str(model_dir),
+)
+
+print()
+print("SDXL Lightning download complete.")
+print(f"Model location: {model_dir}")
+PY
+
+        fi
+
+        #
+        # Verify the installation.
+        #
+
+        if [ ! -f "${MODEL_DIR}/model_index.json" ]; then
+            echo
+            echo "ERROR: SDXL Lightning installation appears incomplete."
+            echo
+            echo "Expected:"
+            echo "  ${MODEL_DIR}/model_index.json"
+            echo
+            echo "The downloaded repository may not be a"
+            echo "complete Diffusers pipeline."
+            echo
+            exit 1
+        fi
+
+        echo
+        echo "SDXL Lightning model verified:"
+        echo "  ${MODEL_DIR}"
+        ;;
+
     *)
+
         echo
         echo "No automatic model downloader is configured"
         echo "for provider: ${PROVIDER}"
