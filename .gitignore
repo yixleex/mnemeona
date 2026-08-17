@@ -29,3 +29,4 @@ mnemeona-image/vendor/
 mnemeona-image/outputs/
 mnemeona-image/__pycache__/
 mnemeona-image/*.log
+mnemeona-image/*.png

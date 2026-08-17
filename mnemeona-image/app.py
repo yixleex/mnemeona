@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import io
 import os
 from pathlib import Path
@@ -10,22 +9,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
-from zimage_engine import ZImageEngine
+from lcm_engine import LCMEngine
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(
+    __file__
+).resolve().parent
+
 
 MODEL_PATH = Path(
     os.environ.get(
-        "MNEMEONA_ZIMAGE_MODEL",
-        ROOT / "models" / "Z-Image-Turbo",
+        "MNEMEONA_IMAGE_MODEL",
+        ROOT
+        / "models"
+        / "LCM_Dreamshaper_v7",
     )
 )
 
 
 app = FastAPI(
     title="Mnemeona Image API",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 
@@ -43,33 +47,35 @@ app.add_middleware(
 )
 
 
-engine = ZImageEngine(
-    MODEL_PATH,
+engine = LCMEngine(
+    MODEL_PATH
 )
 
 
-class GenerateRequest(BaseModel):
+class GenerateRequest(
+    BaseModel
+):
     prompt: str = Field(
         min_length=1,
         max_length=20000,
     )
 
     width: int = Field(
-        default=1024,
+        default=768,
         ge=512,
-        le=1536,
+        le=1024,
     )
 
     height: int = Field(
-        default=1024,
+        default=768,
         ge=512,
-        le=1536,
+        le=1024,
     )
 
     steps: int = Field(
-        default=8,
+        default=4,
         ge=1,
-        le=20,
+        le=8,
     )
 
     seed: int | None = None
@@ -79,9 +85,12 @@ class GenerateRequest(BaseModel):
 def health():
     return {
         "ok": True,
-        "service": "mnemeona-image",
-        "model": "Z-Image-Turbo",
-        "status": engine.status(),
+        "service":
+            "mnemeona-image",
+        "model":
+            "LCM_DreamShaper_v7",
+        "status":
+            engine.status(),
     }
 
 
@@ -91,17 +100,33 @@ def status():
 
 
 @app.post("/generate")
-def generate(request: GenerateRequest):
+def generate(
+    request:
+        GenerateRequest,
+):
     try:
-        image, seed = engine.generate(
-            prompt=request.prompt,
-            width=request.width,
-            height=request.height,
-            steps=request.steps,
-            seed=request.seed,
+        image, seed = (
+            engine.generate(
+                prompt=
+                    request.prompt,
+
+                width=
+                    request.width,
+
+                height=
+                    request.height,
+
+                steps=
+                    request.steps,
+
+                seed=
+                    request.seed,
+            )
         )
 
-        buffer = io.BytesIO()
+        buffer = (
+            io.BytesIO()
+        )
 
         image.save(
             buffer,
@@ -109,12 +134,21 @@ def generate(request: GenerateRequest):
         )
 
         return Response(
-            content=buffer.getvalue(),
-            media_type="image/png",
+            content=
+                buffer.getvalue(),
+
+            media_type=
+                "image/png",
+
             headers={
-                "X-Mnemeona-Seed": str(seed),
-                "X-Mnemeona-Width": str(image.width),
-                "X-Mnemeona-Height": str(image.height),
+                "X-Mnemeona-Seed":
+                    str(seed),
+
+                "X-Mnemeona-Width":
+                    str(image.width),
+
+                "X-Mnemeona-Height":
+                    str(image.height),
             },
         )
 

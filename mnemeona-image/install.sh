@@ -12,19 +12,18 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/venv"
-MODEL_DIR="${SCRIPT_DIR}/models/Z-Image-Turbo"
-ZIMAGE_DIR="${SCRIPT_DIR}/vendor/Z-Image"
+MODEL_DIR="${SCRIPT_DIR}/models/LCM_Dreamshaper_v7"
 
 echo
 echo "============================================================"
-echo "        Mnemeona Z-Image-Turbo Installer"
+echo "       Mnemeona LCM DreamShaper v7 Installer"
 echo "============================================================"
 echo
 
 if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "ERROR: nvidia-smi was not found."
     echo
-    echo "Install/configure your NVIDIA driver first."
+    echo "Please install/configure your NVIDIA driver first."
     exit 1
 fi
 
@@ -36,8 +35,6 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: python3 is required."
     exit 1
 fi
-
-PYTHON_VERSION="$(python3 -c 'import sys; print(sys.version_info.major, sys.version_info.minor)')"
 
 echo "Python:"
 python3 --version
@@ -65,7 +62,10 @@ fi
 
 source "${VENV_DIR}/bin/activate"
 
-python -m pip install --upgrade pip setuptools wheel
+python -m pip install --upgrade \
+    pip \
+    setuptools \
+    wheel
 
 echo
 echo "============================================================"
@@ -101,7 +101,10 @@ props = torch.cuda.get_device_properties(0)
 
 print(
     "VRAM:",
-    round(props.total_memory / 1024**3, 2),
+    round(
+        props.total_memory / 1024**3,
+        2,
+    ),
     "GB",
 )
 PY
@@ -112,45 +115,32 @@ echo "Installing Python dependencies"
 echo "============================================================"
 echo
 
-python -m pip install -r "${SCRIPT_DIR}/requirements.txt"
+python -m pip install \
+    -r "${SCRIPT_DIR}/requirements.txt"
 
 echo
 echo "============================================================"
-echo "Downloading official Z-Image source"
-echo "============================================================"
-echo
-
-mkdir -p "${SCRIPT_DIR}/vendor"
-
-if [ ! -d "${ZIMAGE_DIR}" ]; then
-    git clone \
-        --depth 1 \
-        https://github.com/Tongyi-MAI/Z-Image.git \
-        "${ZIMAGE_DIR}"
-else
-    echo "Z-Image source already exists."
-fi
-
-echo
-echo "============================================================"
-echo "Preparing model directory"
+echo "Downloading LCM DreamShaper v7"
 echo "============================================================"
 echo
 
 mkdir -p "${MODEL_DIR}"
 
 echo
-echo "The Z-Image-Turbo weights will be downloaded next."
-echo
 echo "Model:"
-echo "  Tongyi-MAI/Z-Image-Turbo"
+echo "  SimianLuo/LCM_Dreamshaper_v7"
+echo
+echo "License:"
+echo "  MIT"
+echo
+echo "No Hugging Face login is required for this public model."
 echo
 
 python - <<PY
 from huggingface_hub import snapshot_download
 
 snapshot_download(
-    repo_id="Tongyi-MAI/Z-Image-Turbo",
+    repo_id="SimianLuo/LCM_Dreamshaper_v7",
     local_dir="${MODEL_DIR}",
 )
 PY
@@ -165,15 +155,11 @@ echo "Virtual environment:"
 echo "  ${VENV_DIR}"
 echo
 
-echo "Z-Image source:"
-echo "  ${ZIMAGE_DIR}"
-echo
-
 echo "Model:"
 echo "  ${MODEL_DIR}"
 echo
 
 echo "Next:"
 echo
-echo "  ./test_zimage.py"
+echo "  ./test_lcm.py"
 echo

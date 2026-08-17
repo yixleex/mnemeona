@@ -187,12 +187,12 @@ export function ImageGenerationDialog({
   const [
     height,
     setHeight,
-  ] = useState(1024)
+  ] = useState(768)
 
   const [
     steps,
     setSteps,
-  ] = useState(8)
+  ] = useState(4)
 
   const [
     status,
@@ -353,14 +353,14 @@ export function ImageGenerationDialog({
       await testZImageConnection()
 
       setTestMessage(
-        "Connected to the local Z-Image-Turbo service.",
+        "Connected to the local LCM DreamShaper v7 service.",
       )
     } catch (testError) {
       setTestMessage(
         testError instanceof
           Error
           ? testError.message
-          : "Z-Image-Turbo connection failed.",
+          : "LCM DreamShaper v7 connection failed.",
       )
     } finally {
       setTesting(false)
@@ -629,7 +629,7 @@ export function ImageGenerationDialog({
                   {character.name ||
                     "this character"}
                 </span>{" "}
-                using your local Z-Image-Turbo model.
+                using your local LCM DreamShaper v7 model.
               </DialogDescription>
             </div>
 
@@ -712,7 +712,7 @@ export function ImageGenerationDialog({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">
-                          Z-Image-Turbo
+                          LCM DreamShaper v7
                         </p>
 
                         <p className="mt-1 truncate text-[11px] text-muted-foreground">
@@ -937,9 +937,8 @@ export function ImageGenerationDialog({
                     </p>
 
                     <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                      Z-Image-Turbo is optimized for
-                      fast generation with a small
-                      number of inference steps.
+                        LCM DreamShaper v7 is optimized for high-quality
+                        few-step generation on consumer hardware.
                     </p>
                   </div>
 
@@ -991,7 +990,7 @@ export function ImageGenerationDialog({
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs">
                     <span className="text-muted-foreground">
-                      Generating with Z-Image-Turbo...
+                      Generating with LCM DreamShaper v7...
                     </span>
 
                     <span className="font-medium">
