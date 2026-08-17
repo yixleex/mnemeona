@@ -27,6 +27,10 @@ import {
  * for building its own context.
  *
  * This function acts as the orchestrator.
+ *
+ * Persistent project notes are deliberately NOT handled here.
+ * They are project-level context rather than scene/world entities
+ * and are added by buildAIContext().
  */
 export function buildSceneContext(
   scene: Scene,
@@ -270,7 +274,9 @@ export function formatStoryContext(
   }
 
   const text =
-    sections.join("\n\n")
+    sections.join(
+      "\n\n",
+    )
 
   return {
     text,

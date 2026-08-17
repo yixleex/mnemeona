@@ -40,6 +40,8 @@ import { AISettingsDialog } from "./components/ai/aisettingsdialog/AISettingsDia
 
 import { ReadingMode } from "./components/reader/ReadingMode"
 
+import { NotesPanel } from "./components/notes/NotesPanel"
+
 import { useProject } from "./context/ProjectContext"
 
 import {
@@ -50,6 +52,7 @@ type Workspace =
   | "manuscript"
   | "characters"
   | "world"
+  | "notes"
 
 type CharacterView =
   | "database"
@@ -89,7 +92,9 @@ export default function App() {
   ] = useState(false)
 
   /*
+   * --------------------------------------------------
    * Reading Mode
+   * --------------------------------------------------
    */
 
   const [
@@ -98,11 +103,13 @@ export default function App() {
   ] = useState(false)
 
   /*
-   * Tracks whether the AI Context token counter is currently
-   * waiting for Ollama.
+   * --------------------------------------------------
+   * AI Context Token Counter
+   * --------------------------------------------------
    *
-   * AIContextPanel owns the actual calculation. This state is
-   * only used so App can animate the button that opens the panel.
+   * AIContextPanel owns the actual calculation.
+   * App only tracks whether the calculation is active
+   * so the AI Context button can display its animation.
    */
 
   const [
@@ -111,17 +118,9 @@ export default function App() {
   ] = useState(false)
 
   /*
-   * Keep the response-token setting in App as well as
-   * AIContextPanel so the setting remains synchronized
-   * while the application is mounted.
-   *
-   * IMPORTANT:
-   * App does not mount useAITokenCount.
-   *
-   * Token counting must not be part of the application's
-   * initial render/boot path. AIContextPanel is responsible
-   * for requesting token calculations when the AI Context
-   * interface is actually opened.
+   * --------------------------------------------------
+   * Continue Writing Length
+   * --------------------------------------------------
    */
 
   const [
@@ -132,11 +131,8 @@ export default function App() {
   )
 
   /*
-   * Keep App's copy synchronized when the response length
-   * is changed from AIContextPanel.
-   *
-   * The storage event does not fire in the same tab, so the
-   * custom event lets the two components communicate locally.
+   * Keep App's response-length state synchronized
+   * with AIContextPanel.
    */
 
   useEffect(() => {
@@ -161,23 +157,17 @@ export default function App() {
   }, [])
 
   /*
-   * Keep the variable intentionally referenced so that the
-   * response-token setting remains part of App's state and
+   * Keep the variable intentionally referenced so
+   * the response-token setting remains part of App's
    * synchronization lifecycle.
-   *
-   * Token counting itself is deliberately not performed here.
    */
 
   void continueWritingLength
-  void project
 
   /*
    * --------------------------------------------------
    * Reading Mode
    * --------------------------------------------------
-   *
-   * Opening Reading Mode from the manuscript workspace
-   * starts at the chapter containing the active scene.
    */
 
   const openReadingMode =
@@ -192,14 +182,19 @@ export default function App() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* -------------------------------------------------- */}
+
+      {/* ================================================== */}
       {/* Manuscript Sidebar */}
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
 
       <aside className="flex w-64 shrink-0 flex-col border-r">
+
+        {/* -------------------------------------------------- */}
         {/* Header */}
+        {/* -------------------------------------------------- */}
 
         <header className="flex h-14 items-center border-b px-3">
+
           <ProjectSwitcher />
 
           {/* Appearance */}
@@ -222,11 +217,15 @@ export default function App() {
           >
             <Settings className="size-4" />
           </Button>
+
         </header>
 
+        {/* -------------------------------------------------- */}
         {/* Search */}
+        {/* -------------------------------------------------- */}
 
         <div className="px-3 pb-2 pt-3">
+
           <Button
             variant="ghost"
             className="w-full justify-start gap-2 text-muted-foreground"
@@ -239,11 +238,15 @@ export default function App() {
               ⌘K
             </span>
           </Button>
+
         </div>
 
+        {/* -------------------------------------------------- */}
         {/* Navigation */}
+        {/* -------------------------------------------------- */}
 
         <nav className="flex-1 overflow-y-auto px-3 py-2">
+
           <ManuscriptTree
             active={
               workspace ===
@@ -263,7 +266,10 @@ export default function App() {
           </div>
 
           <div className="space-y-1">
+
+            {/* ------------------------------------------------ */}
             {/* Characters */}
+            {/* ------------------------------------------------ */}
 
             <Button
               variant={
@@ -293,7 +299,9 @@ export default function App() {
               Characters
             </Button>
 
+            {/* ------------------------------------------------ */}
             {/* World */}
+            {/* ------------------------------------------------ */}
 
             <Button
               variant={
@@ -319,36 +327,74 @@ export default function App() {
               World
             </Button>
 
+            {/* ------------------------------------------------ */}
             {/* Notes */}
+            {/* ------------------------------------------------ */}
 
             <Button
-              variant="ghost"
-              className="w-full justify-start gap-2 text-muted-foreground"
+              variant={
+                workspace ===
+                "notes"
+                  ? "secondary"
+                  : "ghost"
+              }
+              className={`w-full justify-start gap-2 ${
+                workspace ===
+                "notes"
+                  ? ""
+                  : "text-muted-foreground"
+              }`}
+              onClick={() => {
+                setWorkspace(
+                  "notes",
+                )
+              }}
             >
               <StickyNote className="size-4" />
 
               Notes
             </Button>
+
           </div>
         </nav>
 
+        {/* -------------------------------------------------- */}
         {/* Word Count */}
+        {/* -------------------------------------------------- */}
 
         <div className="border-t px-4 py-3">
+
           <div className="text-xs text-muted-foreground">
             {projectWordCount.toLocaleString()}{" "}
             words
           </div>
+
         </div>
+
       </aside>
 
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
       {/* Main Workspace */}
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
 
       <main className="flex min-w-0 flex-1 flex-col">
+
+        {/* ================================================== */}
+        {/* Notes Workspace */}
+        {/* ================================================== */}
+
         {workspace ===
-        "world" ? (
+        "notes" ? (
+
+          <NotesPanel />
+
+        ) : workspace ===
+          "world" ? (
+
+          /* ================================================== */
+          /* World Workspace */
+          /* ================================================== */
+
           <WorldDatabase
             onClose={() =>
               setWorkspace(
@@ -356,10 +402,17 @@ export default function App() {
               )
             }
           />
+
         ) : workspace ===
           "characters" ? (
+
+          /* ================================================== */
+          /* Characters Workspace */
+          /* ================================================== */
+
           characterView ===
           "database" ? (
+
             <CharacterDatabase
               onOpenRelationships={() =>
                 setCharacterView(
@@ -367,7 +420,9 @@ export default function App() {
                 )
               }
             />
+
           ) : (
+
             <CharacterRelationships
               onBack={() =>
                 setCharacterView(
@@ -375,15 +430,25 @@ export default function App() {
                 )
               }
             />
+
           )
+
         ) : (
+
+          /* ================================================== */
+          /* Manuscript Workspace */
+          /* ================================================== */
+
           <>
-            {/* -------------------------------------------------- */}
+
+            {/* ------------------------------------------------ */}
             {/* Editor Header */}
-            {/* -------------------------------------------------- */}
+            {/* ------------------------------------------------ */}
 
             <header className="flex h-14 shrink-0 items-center border-b px-6">
+
               <div className="min-w-0">
+
                 <div className="truncate text-sm font-medium">
                   {activeScene?.title ??
                     "No scene selected"}
@@ -394,16 +459,18 @@ export default function App() {
                     {activeScene.pov}
                   </div>
                 )}
+
               </div>
 
               <div className="ml-auto flex items-center gap-1">
+
                 <span className="mr-2 text-xs text-muted-foreground">
                   Saved
                 </span>
 
-                {/* -------------------------------------------------- */}
+                {/* ------------------------------------------------ */}
                 {/* Reading Mode */}
-                {/* -------------------------------------------------- */}
+                {/* ------------------------------------------------ */}
 
                 <Button
                   variant="ghost"
@@ -431,9 +498,9 @@ export default function App() {
                   </span>
                 </Button>
 
-                {/* -------------------------------------------------- */}
+                {/* ------------------------------------------------ */}
                 {/* AI Context */}
-                {/* -------------------------------------------------- */}
+                {/* ------------------------------------------------ */}
 
                 <Button
                   variant="ghost"
@@ -454,6 +521,7 @@ export default function App() {
                       : "AI Context"
                   }
                 >
+
                   {isTokenCountCalculating && (
                     <span
                       aria-hidden="true"
@@ -464,6 +532,7 @@ export default function App() {
                   )}
 
                   <span className="relative z-10 flex items-center gap-2">
+
                     <Sparkles
                       className={`size-4 ${
                         isTokenCountCalculating
@@ -479,12 +548,14 @@ export default function App() {
                         …
                       </span>
                     )}
+
                   </span>
+
                 </Button>
 
-                {/* -------------------------------------------------- */}
+                {/* ------------------------------------------------ */}
                 {/* AI Continue Writing */}
-                {/* -------------------------------------------------- */}
+                {/* ------------------------------------------------ */}
 
                 <Button
                   variant="ghost"
@@ -504,22 +575,27 @@ export default function App() {
                 >
                   <Sparkles className="size-4" />
                 </Button>
+
               </div>
+
             </header>
 
-            {/* -------------------------------------------------- */}
+            {/* ------------------------------------------------ */}
             {/* Editor */}
-            {/* -------------------------------------------------- */}
+            {/* ------------------------------------------------ */}
 
             <div className="min-h-0 flex-1">
+
               <NovelEditor />
+
             </div>
 
-            {/* -------------------------------------------------- */}
+            {/* ------------------------------------------------ */}
             {/* Editor Footer */}
-            {/* -------------------------------------------------- */}
+            {/* ------------------------------------------------ */}
 
             <footer className="flex h-9 shrink-0 items-center border-t px-6 text-xs text-muted-foreground">
+
               <span>
                 {activeScene?.title ??
                   "No scene selected"}
@@ -527,6 +603,7 @@ export default function App() {
 
               {activeScene && (
                 <>
+
                   <span className="mx-2">
                     ·
                   </span>
@@ -535,28 +612,34 @@ export default function App() {
                     {activeSceneWordCount.toLocaleString()}{" "}
                     words
                   </span>
+
                 </>
               )}
 
               <span className="ml-auto">
                 Saved just now
               </span>
+
             </footer>
+
           </>
+
         )}
+
       </main>
 
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
       {/* AI Chat Sidebar */}
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
 
       <AIChatPanel />
 
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
       {/* Reading Mode */}
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
 
       {showReadingMode && (
+
         <ReadingMode
           acts={
             project.manuscript.acts
@@ -572,14 +655,17 @@ export default function App() {
             closeReadingMode
           }
         />
+
       )}
 
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
       {/* AI Context Modal */}
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
 
       {showAIContext && (
+
         <div className="fixed inset-0 z-50 flex items-center justify-center">
+
           <button
             type="button"
             aria-label="Close AI Context"
@@ -592,13 +678,21 @@ export default function App() {
           />
 
           <div className="relative z-10 flex h-[85vh] w-[min(1100px,90vw)] flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+
+            {/* Header */}
+
             <header className="flex h-14 shrink-0 items-center justify-between border-b px-5">
+
               <div className="flex items-center gap-2">
+
                 <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
+
                   <Sparkles className="size-4 text-primary" />
+
                 </div>
 
                 <div>
+
                   <div className="text-sm font-medium">
                     AI Context
                   </div>
@@ -606,7 +700,9 @@ export default function App() {
                   <div className="text-[11px] text-muted-foreground">
                     Context available to Mnemeona AI
                   </div>
+
                 </div>
+
               </div>
 
               <Button
@@ -621,22 +717,30 @@ export default function App() {
               >
                 <X className="size-4" />
               </Button>
+
             </header>
 
+            {/* Context */}
+
             <div className="min-h-0 flex-1 overflow-y-auto">
+
               <AIContextPanel
                 onTokenCalculationChange={
                   setIsTokenCountCalculating
                 }
               />
+
             </div>
+
           </div>
+
         </div>
+
       )}
 
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
       {/* AI Settings Modal */}
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
 
       <AISettingsDialog
         open={
@@ -647,26 +751,32 @@ export default function App() {
         }
       />
 
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
       {/* Story Summary Generation Modal */}
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
 
       {summaryGenerating && (
+
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
           role="presentation"
         >
+
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Updating story summary"
             className="relative z-10 w-[min(420px,90vw)] rounded-2xl border bg-background p-6 shadow-2xl"
           >
+
             <div className="flex flex-col items-center text-center">
+
               {/* Spinner */}
 
               <div className="mb-5 flex size-12 items-center justify-center rounded-full border-2 border-muted border-t-primary animate-spin">
+
                 <Sparkles className="size-5 text-primary" />
+
               </div>
 
               <h2 className="text-base font-medium">
@@ -684,14 +794,18 @@ export default function App() {
                 Please wait while this
                 finishes.
               </p>
+
             </div>
+
           </div>
+
         </div>
+
       )}
 
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
       {/* AI Context Animations */}
-      {/* -------------------------------------------------- */}
+      {/* ================================================== */}
 
       <style>
         {`
@@ -719,6 +833,7 @@ export default function App() {
           }
         `}
       </style>
+
     </div>
   )
 }
@@ -738,7 +853,9 @@ function findChapterForScene(
   }
 
   for (const act of acts) {
+
     for (const chapter of act.chapters) {
+
       if (
         chapter.scenes.some(
           (scene) =>
@@ -747,7 +864,9 @@ function findChapterForScene(
       ) {
         return chapter.id
       }
+
     }
+
   }
 
   return null

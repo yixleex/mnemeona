@@ -3,6 +3,10 @@ import {
   formatStoryContext,
 } from "../aicontext/buildSceneContext"
 
+import {
+  buildNotesContext,
+} from "../aicontext/buildNotesContext"
+
 import type { MnemeonaProject } from "@/types/project"
 
 // --------------------------------------------------
@@ -189,6 +193,11 @@ export function buildAIContext(
   project: MnemeonaProject,
   activeScene: ProjectScene,
 ): string {
+  const notesContext =
+    buildNotesContext(
+      project,
+    )
+
   const context =
     buildSceneContext(
       activeScene,
@@ -206,15 +215,60 @@ export function buildAIContext(
     project.storySummary?.trim() ||
     "No story summary has been generated yet."
 
-  return `STORY SO FAR:
+  const sections: string[] = []
 
-${storySummary}
+  /*
+   * --------------------------------------------------
+   * Persistent Notes
+   * --------------------------------------------------
+   *
+   * These are author-controlled instructions/canon that
+   * should remain available regardless of the current scene.
+   */
 
-CURRENT STORY CONTEXT:
+  if (
+    notesContext.trim()
+  ) {
+    sections.push(
+      notesContext,
+    )
+  }
 
-${formattedContext}`
+  /*
+   * --------------------------------------------------
+   * Story So Far
+   * --------------------------------------------------
+   *
+   * This is generated continuity describing what has
+   * actually happened in the manuscript.
+   */
+
+  sections.push(
+    [
+      "## Story So Far",
+      "",
+      storySummary,
+    ].join("\n"),
+  )
+
+  /*
+   * --------------------------------------------------
+   * Current Story Context
+   * --------------------------------------------------
+   */
+
+  sections.push(
+    [
+      "## Current Story Context",
+      "",
+      formattedContext,
+    ].join("\n"),
+  )
+
+  return sections.join(
+    "\n\n",
+  )
 }
-
 // --------------------------------------------------
 // Scene Text Extraction
 // --------------------------------------------------
