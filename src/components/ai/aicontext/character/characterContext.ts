@@ -112,7 +112,7 @@ function buildRelevantRelationships(
           character.id,
 
         relatedCharacterId:
-          relationship.characterId,
+          relationship.targetCharacterId,
 
         type:
           relationship.type,
