@@ -10,6 +10,10 @@ import {
   X,
 } from "lucide-react"
 
+import {
+  ThemeToggle,
+} from "./components/theme/ThemeToggle"
+
 import { Button } from "@/components/ui/button"
 import { NovelEditor } from "@/components/editor/NovelEditor"
 import { ProjectSwitcher } from "./components/project/ProjectSwitcher"
@@ -148,7 +152,10 @@ export default function App() {
         {/* Header */}
 
         <header className="flex h-14 items-center border-b px-3">
-          <ProjectSwitcher />
+            <ProjectSwitcher />
+
+            {/* Appearance */}
+            <ThemeToggle />
 
           {/* Settings */}
           <Button

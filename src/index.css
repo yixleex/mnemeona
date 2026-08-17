@@ -138,7 +138,28 @@
   @apply border-border outline-ring/50;
   }
 
-html,
+  html {
+    color-scheme: light;
+    transition:
+      background-color 180ms ease,
+      color 180ms ease;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body,
+  button,
+  input,
+  textarea,
+  select {
+    transition:
+      background-color 180ms ease,
+      border-color 180ms ease,
+      color 180ms ease,
+      box-shadow 180ms ease;
+  }
 body,
 #root {
 width: 100%;
