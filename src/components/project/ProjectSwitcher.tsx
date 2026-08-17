@@ -454,18 +454,16 @@ export function ProjectSwitcher() {
         <DropdownMenuTrigger
           asChild
         >
-          <Button
-            variant="ghost"
-            className="max-w-64 gap-2 px-2"
-          >
-            <span className="truncate">
-              {
-                project.title
-              }
-            </span>
+            <Button
+              variant="ghost"
+              className="w-44 min-w-0 gap-2 px-2"
+            >
+              <span className="min-w-0 flex-1 truncate">
+                {project.title}
+              </span>
 
-            <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-          </Button>
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+            </Button>
         </DropdownMenuTrigger>
 
         <DropdownMenuContent
