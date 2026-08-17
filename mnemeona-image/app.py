@@ -10,45 +10,32 @@ from pydantic import BaseModel, Field
 from starlette.responses import Response
 
 from lcm_engine import LCMEngine
+from ollama_manager import OllamaGPUManager
 
 
-ROOT = Path(
-    __file__
-).resolve().parent
-
+ROOT = Path(__file__).resolve().parent
 
 MODEL_PATH = Path(
     os.environ.get(
         "MNEMEONA_IMAGE_MODEL",
-        ROOT
-        / "models"
-        / "LCM_Dreamshaper_v7",
+        ROOT / "models" / "LCM_Dreamshaper_v7",
     )
 )
 
-
 app = FastAPI(
     title="Mnemeona Image API",
-    version="0.2.0",
+    version="0.3.0",
 )
-
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        # Vite development server
         "http://localhost:1420",
         "http://127.0.0.1:1420",
-
-        # Vite HMR
         "http://localhost:1421",
         "http://127.0.0.1:1421",
-
-        # Tauri
         "tauri://localhost",
         "http://tauri.localhost",
-
-        # Older/default Vite development ports
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
@@ -57,15 +44,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-engine = LCMEngine(
-    MODEL_PATH
-)
+engine = LCMEngine(MODEL_PATH)
+ollama = OllamaGPUManager()
 
 
-class GenerateRequest(
-    BaseModel
-):
+class GenerateRequest(BaseModel):
     prompt: str = Field(
         min_length=1,
         max_length=20000,
@@ -96,48 +79,50 @@ class GenerateRequest(
 def health():
     return {
         "ok": True,
-        "service":
-            "mnemeona-image",
-        "model":
-            "LCM_DreamShaper_v7",
-        "status":
-            engine.status(),
+        "service": "mnemeona-image",
+        "model": "LCM_DreamShaper_v7",
+        "status": engine.status(),
+        "ollama": ollama.status(),
     }
 
 
 @app.get("/status")
 def status():
-    return engine.status()
+    return {
+        **engine.status(),
+        "ollama": ollama.status(),
+    }
+
+
+@app.get("/gpu-status")
+def gpu_status():
+    return {
+        "image": engine.status(),
+        "ollama": ollama.status(),
+    }
 
 
 @app.post("/generate")
-def generate(
-    request:
-        GenerateRequest,
-):
+def generate(request: GenerateRequest):
+    unloaded_models: list[str] = []
+
     try:
-        image, seed = (
-            engine.generate(
-                prompt=
-                    request.prompt,
-
-                width=
-                    request.width,
-
-                height=
-                    request.height,
-
-                steps=
-                    request.steps,
-
-                seed=
-                    request.seed,
-            )
+        # IMPORTANT:
+        # Ollama keeps models in VRAM by default. Evict the
+        # currently running Story AI before loading the image model.
+        unloaded_models = (
+            ollama.unload_for_image_generation()
         )
 
-        buffer = (
-            io.BytesIO()
+        image, seed = engine.generate(
+            prompt=request.prompt,
+            width=request.width,
+            height=request.height,
+            steps=request.steps,
+            seed=request.seed,
         )
+
+        buffer = io.BytesIO()
 
         image.save(
             buffer,
@@ -145,21 +130,15 @@ def generate(
         )
 
         return Response(
-            content=
-                buffer.getvalue(),
-
-            media_type=
-                "image/png",
-
+            content=buffer.getvalue(),
+            media_type="image/png",
             headers={
-                "X-Mnemeona-Seed":
-                    str(seed),
-
-                "X-Mnemeona-Width":
-                    str(image.width),
-
-                "X-Mnemeona-Height":
-                    str(image.height),
+                "X-Mnemeona-Seed": str(seed),
+                "X-Mnemeona-Width": str(image.width),
+                "X-Mnemeona-Height": str(image.height),
+                "X-Mnemeona-Ollama-Unloaded": (
+                    ",".join(unloaded_models)
+                ),
             },
         )
 
@@ -168,3 +147,11 @@ def generate(
             status_code=500,
             detail=str(exc),
         ) from exc
+
+    finally:
+        # The image engine is no longer needed once the PNG has
+        # been produced, so free its VRAM before restoring Ollama.
+        try:
+            engine.unload()
+        finally:
+            ollama.restore_after_image_generation()

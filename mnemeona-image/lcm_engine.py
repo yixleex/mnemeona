@@ -15,12 +15,8 @@ class LCMEngine:
         self,
         model_path: str | Path,
     ) -> None:
-        self.model_path = Path(
-            model_path
-        )
-
+        self.model_path = Path(model_path)
         self._pipeline = None
-
         self._lock = threading.Lock()
 
         self.device = (
@@ -29,10 +25,11 @@ class LCMEngine:
             else "cpu"
         )
 
-        if self.device == "cuda":
-            self.dtype = torch.float16
-        else:
-            self.dtype = torch.float32
+        self.dtype = (
+            torch.float16
+            if self.device == "cuda"
+            else torch.float32
+        )
 
     def status(self) -> dict:
         gpu = None
@@ -40,25 +37,16 @@ class LCMEngine:
         vram_free = None
 
         if torch.cuda.is_available():
-            gpu = (
-                torch.cuda.get_device_name(0)
-            )
+            gpu = torch.cuda.get_device_name(0)
 
-            props = (
-                torch.cuda.get_device_properties(
-                    0
-                )
-            )
+            props = torch.cuda.get_device_properties(0)
 
             vram_total = round(
-                props.total_memory
-                / 1024**3,
+                props.total_memory / 1024**3,
                 2,
             )
 
-            free, total = (
-                torch.cuda.mem_get_info()
-            )
+            free, _ = torch.cuda.mem_get_info()
 
             vram_free = round(
                 free / 1024**3,
@@ -66,87 +54,53 @@ class LCMEngine:
             )
 
         return {
-            "loaded":
-                self._pipeline is not None,
-
-            "device":
-                self.device,
-
-            "dtype":
-                str(self.dtype),
-
-            "gpu":
-                gpu,
-
-            "vram_total_gb":
-                vram_total,
-
-            "vram_free_gb":
-                vram_free,
-
-            "model":
-                "LCM_DreamShaper_v7",
-
-            "model_path":
-                str(
-                    self.model_path
-                ),
+            "loaded": self._pipeline is not None,
+            "device": self.device,
+            "dtype": str(self.dtype),
+            "gpu": gpu,
+            "vram_total_gb": vram_total,
+            "vram_free_gb": vram_free,
+            "model": "LCM_DreamShaper_v7",
+            "model_path": str(self.model_path),
         }
 
     def load(self) -> None:
-        if (
-            self._pipeline
-            is not None
-        ):
+        if self._pipeline is not None:
             return
 
         if not self.model_path.exists():
             raise RuntimeError(
-                "LCM DreamShaper v7 model "
-                f"was not found at "
+                "LCM DreamShaper v7 model was not found at "
                 f"{self.model_path}"
             )
 
-        print(
-            "Loading "
-            "LCM DreamShaper v7..."
+        print("Loading LCM DreamShaper v7...")
+
+        from diffusers import DiffusionPipeline
+
+        pipe = DiffusionPipeline.from_pretrained(
+            str(self.model_path),
+            torch_dtype=self.dtype,
         )
 
-        from diffusers import (
-            DiffusionPipeline,
-        )
-
-        pipe = (
-            DiffusionPipeline
-            .from_pretrained(
-                str(
-                    self.model_path
-                ),
-                torch_dtype=(
-                    self.dtype
-                ),
-            )
-        )
-
-        if (
-            self.device ==
-            "cuda"
-        ):
+        if self.device == "cuda":
             pipe.enable_model_cpu_offload()
+            pipe.enable_attention_slicing()
+
+            if hasattr(pipe, "enable_vae_slicing"):
+                pipe.enable_vae_slicing()
+
+            if hasattr(pipe, "enable_vae_tiling"):
+                pipe.enable_vae_tiling()
         else:
             pipe.to("cpu")
 
         self._pipeline = pipe
 
-        print(
-            "LCM DreamShaper v7 loaded."
-        )
+        print("LCM DreamShaper v7 loaded.")
 
     def unload(self) -> None:
-        if (
-            self._pipeline
-            is None
-        ):
+        if self._pipeline is None:
             return
 
         self._pipeline = None
@@ -164,41 +118,29 @@ class LCMEngine:
         height: int = 768,
         steps: int = 4,
         seed: Optional[int] = None,
-    ) -> tuple[
-        Image.Image,
-        int,
-    ]:
+    ) -> tuple[Image.Image, int]:
         if not prompt.strip():
-            raise ValueError(
-                "Prompt cannot be empty."
-            )
+            raise ValueError("Prompt cannot be empty.")
 
         if width < 512:
-            raise ValueError(
-                "Width must be at least 512."
-            )
+            raise ValueError("Width must be at least 512.")
 
         if height < 512:
-            raise ValueError(
-                "Height must be at least 512."
-            )
+            raise ValueError("Height must be at least 512.")
 
         if width > 1024:
             raise ValueError(
-                "Width above 1024 is not "
-                "recommended for this model."
+                "Width above 1024 is not recommended for this model."
             )
 
         if height > 1024:
             raise ValueError(
-                "Height above 1024 is not "
-                "recommended for this model."
+                "Height above 1024 is not recommended for this model."
             )
 
         if steps < 1 or steps > 8:
             raise ValueError(
-                "LCM steps must be "
-                "between 1 and 8."
+                "LCM steps must be between 1 and 8."
             )
 
         if seed is None:
@@ -210,18 +152,13 @@ class LCMEngine:
         with self._lock:
             self.load()
 
-            generator = (
-                torch.Generator(
-                    device=(
-                        "cuda"
-                        if self.device ==
-                        "cuda"
-                        else "cpu"
-                    )
-                ).manual_seed(
-                    seed
+            generator = torch.Generator(
+                device=(
+                    "cuda"
+                    if self.device == "cuda"
+                    else "cpu"
                 )
-            )
+            ).manual_seed(seed)
 
             result = self._pipeline(
                 prompt=prompt,
@@ -233,11 +170,4 @@ class LCMEngine:
                 generator=generator,
             )
 
-            image = (
-                result.images[0]
-            )
-
-            return (
-                image,
-                seed,
-            )
+            return result.images[0], seed
