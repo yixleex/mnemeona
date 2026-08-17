@@ -39,7 +39,6 @@ import type {
 } from "@/types/image"
 
 import {
-    deleteImage,
   listProjectImages,
 } from "@/lib/imageDatabase"
 
@@ -62,17 +61,13 @@ export function CharacterDatabase({
     updateCharacterContext,
   } = useProject()
 
-  const characters =
-    project.characters
+  const characters = project.characters
 
   const [
     selectedId,
     setSelectedId,
-  ] = useState<
-    string | null
-  >(
-    characters[0]?.id ??
-      null,
+  ] = useState<string | null>(
+    characters[0]?.id ?? null,
   )
 
   const [
@@ -90,48 +85,33 @@ export function CharacterDatabase({
     setCharacterImageDialogOpen,
   ] = useState(false)
 
-  /*
-   * Map character ID -> primary image.
-   *
-   * This is loaded from IndexedDB because
-   * images are stored separately from the
-   * project data.
-   */
   const [
     characterImages,
     setCharacterImages,
-  ] = useState<
-    Map<string, MnemeonaImage>
-  >(new Map())
+  ] = useState<Map<string, MnemeonaImage>>(
+    new Map(),
+  )
 
-  /*
-   * Object URLs used by the UI.
-   */
   const [
     imageUrls,
     setImageUrls,
-  ] = useState<
-    Map<string, string>
-  >(new Map())
+  ] = useState<Map<string, string>>(
+    new Map(),
+  )
 
-  /*
-   * Keep selected character valid.
-   */
   useEffect(() => {
     if (
       selectedId &&
       characters.some(
         (character) =>
-          character.id ===
-          selectedId,
+          character.id === selectedId,
       )
     ) {
       return
     }
 
     setSelectedId(
-      characters[0]?.id ??
-        null,
+      characters[0]?.id ?? null,
     )
   }, [
     characters,
@@ -141,14 +121,9 @@ export function CharacterDatabase({
   const selectedCharacter =
     characters.find(
       (character) =>
-        character.id ===
-        selectedId,
+        character.id === selectedId,
     ) ?? null
 
-  /*
-   * Load character images whenever
-   * the project or character data changes.
-   */
   useEffect(() => {
     let cancelled = false
 
@@ -164,26 +139,18 @@ export function CharacterDatabase({
         }
 
         const characterImageMap =
-          new Map<
-            string,
-            MnemeonaImage
-          >()
+          new Map<string, MnemeonaImage>()
 
         const urls =
-          new Map<
-            string,
-            string
-          >()
+          new Map<string, string>()
 
         for (const character of characters) {
           const available =
             images
               .filter(
                 (image) =>
-                  image.type ===
-                    "character" &&
-                  image.entityId ===
-                    character.id,
+                  image.type === "character" &&
+                  image.entityId === character.id,
               )
               .sort(
                 (a, b) =>
@@ -199,19 +166,12 @@ export function CharacterDatabase({
             continue
           }
 
-          /*
-           * Prefer explicitly selected image.
-           *
-           * Fall back to newest generated
-           * image for older characters.
-           */
           const primary =
             available.find(
               (image) =>
                 image.id ===
                 character.primaryImageId,
-            ) ??
-            available[0]
+            ) ?? available[0]
 
           characterImageMap.set(
             character.id,
@@ -232,39 +192,30 @@ export function CharacterDatabase({
 
         setImageUrls(urls)
       } catch {
-        /*
-         * Image loading should never prevent
-         * the character database itself from
-         * rendering.
-         */
+        // Image loading should never prevent
+        // the character database from rendering.
       }
     }
 
     loadCharacterImages()
 
     return () => {
-        cancelled = true
-        imageUrls.forEach((url) => {
-            URL.revokeObjectURL(url)
-          })
+      cancelled = true
+
+      imageUrls.forEach((url) => {
+        URL.revokeObjectURL(url)
+      })
     }
   }, [
     project.id,
     characters,
   ])
 
-  /*
-   * Revoke object URLs when replaced.
-   */
   useEffect(() => {
     return () => {
-      imageUrls.forEach(
-        (url) => {
-          URL.revokeObjectURL(
-            url,
-          )
-        },
-      )
+      imageUrls.forEach((url) => {
+        URL.revokeObjectURL(url)
+      })
     }
   }, [imageUrls])
 
@@ -280,24 +231,19 @@ export function CharacterDatabase({
       }
 
       return characters.filter(
-        (character) => {
-          return (
-            character.name
-              .toLowerCase()
-              .includes(query) ||
-            character.role
-              .toLowerCase()
-              .includes(query) ||
-            character.aliases.some(
-              (alias) =>
-                alias
-                  .toLowerCase()
-                  .includes(
-                    query,
-                  ),
-            )
-          )
-        },
+        (character) =>
+          character.name
+            .toLowerCase()
+            .includes(query) ||
+          character.role
+            .toLowerCase()
+            .includes(query) ||
+          character.aliases.some(
+            (alias) =>
+              alias
+                .toLowerCase()
+                .includes(query),
+          ),
       )
     }, [
       characters,
@@ -305,8 +251,7 @@ export function CharacterDatabase({
     ])
 
   function handleCreateCharacter() {
-    const id =
-      addCharacter()
+    const id = addCharacter()
 
     setSelectedId(id)
   }
@@ -322,17 +267,13 @@ export function CharacterDatabase({
     const nextCharacter =
       characters.find(
         (character) =>
-          character.id !==
-          deletedId,
+          character.id !== deletedId,
       )
 
-    deleteCharacter(
-      deletedId,
-    )
+    deleteCharacter(deletedId)
 
     setSelectedId(
-      nextCharacter?.id ??
-        null,
+      nextCharacter?.id ?? null,
     )
   }
 
@@ -349,9 +290,7 @@ export function CharacterDatabase({
       return
     }
 
-    setCharacterImageDialogOpen(
-      true,
-    )
+    setCharacterImageDialogOpen(true)
   }
 
   function handleImageSaved(
@@ -362,28 +301,19 @@ export function CharacterDatabase({
     }
 
     const existingIds =
-      selectedCharacter.imageIds ??
-      []
+      selectedCharacter.imageIds ?? []
 
     updateCharacter(
       selectedCharacter.id,
       {
         imageIds:
-          existingIds.includes(
-            imageId,
-          )
+          existingIds.includes(imageId)
             ? existingIds
             : [
                 ...existingIds,
                 imageId,
               ],
-
-        /*
-         * A newly generated image becomes
-         * the active character image.
-         */
-        primaryImageId:
-          imageId,
+        primaryImageId: imageId,
       },
     )
   }
@@ -396,24 +326,19 @@ export function CharacterDatabase({
     }
 
     const existingIds =
-      selectedCharacter.imageIds ??
-      []
+      selectedCharacter.imageIds ?? []
 
     updateCharacter(
       selectedCharacter.id,
       {
         imageIds:
-          existingIds.includes(
-            imageId,
-          )
+          existingIds.includes(imageId)
             ? existingIds
             : [
                 ...existingIds,
                 imageId,
               ],
-
-        primaryImageId:
-          imageId,
+        primaryImageId: imageId,
       },
     )
   }
@@ -426,31 +351,27 @@ export function CharacterDatabase({
       return
     }
 
-    const remainingIds = (
-      selectedCharacter.imageIds ?? []
-    ).filter(
-      (id) => id !== imageId,
-    )
+    const remainingIds =
+      (
+        selectedCharacter.imageIds ?? []
+      ).filter(
+        (id) => id !== imageId,
+      )
 
     updateCharacter(
       selectedCharacter.id,
       {
         imageIds: remainingIds,
         primaryImageId:
-          nextPrimaryImageId || undefined,
+          nextPrimaryImageId ||
+          undefined,
       },
     )
 
-    /*
-     * Force the character image state to refresh
-     * immediately after deletion.
-     *
-     * CharacterImageDialog has already removed
-     * the actual Blob from IndexedDB.
-     */
     setCharacterImages(
       (current) => {
-        const next = new Map(current)
+        const next =
+          new Map(current)
 
         const currentImage =
           next.get(
@@ -472,9 +393,8 @@ export function CharacterDatabase({
 
     setImageUrls(
       (current) => {
-        const next = new Map(
-          current,
-        )
+        const next =
+          new Map(current)
 
         const currentUrl =
           next.get(
@@ -496,7 +416,7 @@ export function CharacterDatabase({
     )
   }
 
-    const selectedImageUrl =
+  const selectedImageUrl =
     selectedCharacter
       ? imageUrls.get(
           selectedCharacter.id,
@@ -505,7 +425,6 @@ export function CharacterDatabase({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Header */}
       <header
         className="
           flex
@@ -533,8 +452,7 @@ export function CharacterDatabase({
             "
           >
             {characters.length}{" "}
-            {characters.length ===
-            1
+            {characters.length === 1
               ? "character"
               : "characters"}{" "}
             in your story
@@ -583,7 +501,6 @@ export function CharacterDatabase({
         </div>
       </header>
 
-      {/* Workspace */}
       <div
         className="
           flex
@@ -591,7 +508,6 @@ export function CharacterDatabase({
           flex-1
         "
       >
-        {/* Character list */}
         <aside
           className="
             flex
@@ -621,12 +537,9 @@ export function CharacterDatabase({
 
               <input
                 value={search}
-                onChange={(
-                  event,
-                ) =>
+                onChange={(event) =>
                   setSearch(
-                    event.target
-                      .value,
+                    event.target.value,
                   )
                 }
                 placeholder="Search characters..."
@@ -669,9 +582,7 @@ export function CharacterDatabase({
 
                 return (
                   <button
-                    key={
-                      character.id
-                    }
+                    key={character.id}
                     type="button"
                     onClick={() =>
                       setSelectedId(
@@ -696,7 +607,6 @@ export function CharacterDatabase({
                       }
                     `}
                   >
-                    {/* Avatar */}
                     <div
                       className="
                         size-9
@@ -708,9 +618,7 @@ export function CharacterDatabase({
                     >
                       {imageUrl ? (
                         <img
-                          src={
-                            imageUrl
-                          }
+                          src={imageUrl}
                           alt=""
                           className="
                             size-full
@@ -729,9 +637,7 @@ export function CharacterDatabase({
                           "
                         >
                           {character.name
-                            .charAt(
-                              0,
-                            )
+                            .charAt(0)
                             .toUpperCase() ||
                             "?"}
                         </div>
@@ -762,8 +668,7 @@ export function CharacterDatabase({
                         "
                       >
                         {character.role ||
-                          character
-                            .aliases[0] ||
+                          character.aliases[0] ||
                           "No role assigned"}
                       </div>
                     </div>
@@ -809,8 +714,7 @@ export function CharacterDatabase({
                     font-medium
                   "
                 >
-                  {characters.length ===
-                  0
+                  {characters.length === 0
                     ? "No characters yet"
                     : "No characters found"}
                 </p>
@@ -822,8 +726,7 @@ export function CharacterDatabase({
                     text-muted-foreground
                   "
                 >
-                  {characters.length ===
-                  0
+                  {characters.length === 0
                     ? "Create your first character to begin."
                     : "Try a different search."}
                 </p>
@@ -851,7 +754,6 @@ export function CharacterDatabase({
           </div>
         </aside>
 
-        {/* Character editor */}
         <main
           className="
             min-w-0
@@ -873,9 +775,7 @@ export function CharacterDatabase({
                   selectedCharacter.id,
                 )
               }
-              onUpdate={(
-                updates,
-              ) =>
+              onUpdate={(updates) =>
                 updateCharacter(
                   selectedCharacter.id,
                   updates,
@@ -964,58 +864,48 @@ export function CharacterDatabase({
         </main>
       </div>
 
-      {/* Generate image */}
       {selectedCharacter && (
         <ImageGenerationDialog
-          open={
-            imageDialogOpen
-          }
+          open={imageDialogOpen}
           onOpenChange={
             setImageDialogOpen
           }
           character={
             selectedCharacter
           }
-          projectId={
-            project.id
-          }
+          projectId={project.id}
           onImageSaved={
             handleImageSaved
           }
         />
       )}
 
-      {/* Choose existing image */}
       {selectedCharacter && (
-          <CharacterImageDialog
-            open={
-              characterImageDialogOpen
-            }
-            onOpenChange={
-              setCharacterImageDialogOpen
-            }
-            character={
-              selectedCharacter
-            }
-            projectId={
-              project.id
-            }
-            onSelect={
-              handleCharacterImageSelected
-            }
-            onDelete={
-              handleCharacterImageDeleted
-            }
-            onGenerateImage={() => {
-              setCharacterImageDialogOpen(
-                false,
-              )
+        <CharacterImageDialog
+          open={
+            characterImageDialogOpen
+          }
+          onOpenChange={
+            setCharacterImageDialogOpen
+          }
+          character={
+            selectedCharacter
+          }
+          projectId={project.id}
+          onSelect={
+            handleCharacterImageSelected
+          }
+          onDelete={
+            handleCharacterImageDeleted
+          }
+          onGenerateImage={() => {
+            setCharacterImageDialogOpen(
+              false,
+            )
 
-              setImageDialogOpen(
-                true,
-              )
-            }}
-          />
+            setImageDialogOpen(true)
+          }}
+        />
       )}
     </div>
   )
@@ -1066,8 +956,7 @@ function CharacterEditor({
     const alreadyExists =
       character.aliases.some(
         (existing) =>
-          existing
-            .toLowerCase() ===
+          existing.toLowerCase() ===
           alias.toLowerCase(),
       )
 
@@ -1115,12 +1004,11 @@ function CharacterEditor({
     <div
       className="
         mx-auto
-        max-w-3xl
+        max-w-4xl
         px-8
         py-8
       "
     >
-      {/* Character heading */}
       <div
         className="
           mb-8
@@ -1129,7 +1017,6 @@ function CharacterEditor({
           gap-4
         "
       >
-        {/* Large character image */}
         <div
           className="
             relative
@@ -1167,9 +1054,7 @@ function CharacterEditor({
               "
             >
               {character.name
-                .charAt(
-                  0,
-                )
+                .charAt(0)
                 .toUpperCase() ||
                 "?"}
             </div>
@@ -1183,16 +1068,11 @@ function CharacterEditor({
           "
         >
           <input
-            value={
-              character.name
-            }
-            onChange={(
-              event,
-            ) =>
+            value={character.name}
+            onChange={(event) =>
               onUpdate({
                 name:
-                  event.target
-                    .value,
+                  event.target.value,
               })
             }
             className="
@@ -1207,16 +1087,11 @@ function CharacterEditor({
           />
 
           <input
-            value={
-              character.role
-            }
-            onChange={(
-              event,
-            ) =>
+            value={character.role}
+            onChange={(event) =>
               onUpdate({
                 role:
-                  event.target
-                    .value,
+                  event.target.value,
               })
             }
             className="
@@ -1230,7 +1105,6 @@ function CharacterEditor({
             placeholder="Role — protagonist, antagonist, mentor..."
           />
 
-          {/* Image controls */}
           <div
             className="
               mt-3
@@ -1290,7 +1164,6 @@ function CharacterEditor({
         </div>
       </div>
 
-      {/* Aliases */}
       <CharacterSection
         title="Aliases"
         description="Other names, nicknames, titles, or names this character may be called."
@@ -1299,15 +1172,9 @@ function CharacterEditor({
           aliases={
             character.aliases
           }
-          onAdd={
-            addAlias
-          }
-          onRemove={
-            removeAlias
-          }
-          onUpdate={
-            updateAlias
-          }
+          onAdd={addAlias}
+          onRemove={removeAlias}
+          onUpdate={updateAlias}
         />
 
         <p
@@ -1323,7 +1190,6 @@ function CharacterEditor({
         </p>
       </CharacterSection>
 
-      {/* AI context */}
       <section
         className="
           mt-8
@@ -1442,7 +1308,6 @@ function CharacterEditor({
         </div>
       </section>
 
-      {/* Overview */}
       <CharacterSection
         title="Overview"
         description="The essential information Mnemeona should know."
@@ -1451,9 +1316,7 @@ function CharacterEditor({
           value={
             character.summary
           }
-          onChange={(
-            value,
-          ) =>
+          onChange={(value) =>
             onUpdate({
               summary: value,
             })
@@ -1462,18 +1325,13 @@ function CharacterEditor({
         />
       </CharacterSection>
 
-      {/* Age */}
       <CharacterSection
         title="Age"
         description="How old is the character"
       >
         <CharacterInput
-          value={
-            character.age
-          }
-          onChange={(
-            value,
-          ) =>
+          value={character.age}
+          onChange={(value) =>
             onUpdate({
               age: value,
             })
@@ -1482,7 +1340,6 @@ function CharacterEditor({
         />
       </CharacterSection>
 
-      {/* Personality */}
       <CharacterSection
         title="Personality"
         description="How they think, behave, speak, and react."
@@ -1491,9 +1348,7 @@ function CharacterEditor({
           value={
             character.personality
           }
-          onChange={(
-            value,
-          ) =>
+          onChange={(value) =>
             onUpdate({
               personality: value,
             })
@@ -1502,7 +1357,6 @@ function CharacterEditor({
         />
       </CharacterSection>
 
-      {/* Appearance */}
       <CharacterSection
         title="Appearance"
         description="Physical traits and visual details."
@@ -1511,9 +1365,7 @@ function CharacterEditor({
           value={
             character.appearance
           }
-          onChange={(
-            value,
-          ) =>
+          onChange={(value) =>
             onUpdate({
               appearance: value,
             })
@@ -1522,27 +1374,25 @@ function CharacterEditor({
         />
       </CharacterSection>
 
-      {/* Background */}
+      {/* Long-form character backstory */}
       <CharacterSection
         title="Background"
-        description="History, upbringing, and important past events."
+        description="History, upbringing, formative experiences, relationships, important past events, and anything else that shaped who this character is."
       >
         <CharacterTextarea
           value={
             character.background
           }
-          onChange={(
-            value,
-          ) =>
+          onChange={(value) =>
             onUpdate({
               background: value,
             })
           }
-          placeholder="Where did they come from?"
+          placeholder="Tell the full story of this character's past..."
+          large
         />
       </CharacterSection>
 
-      {/* Goals & motivation */}
       <CharacterSection
         title="Goals & motivation"
         description="What drives them forward?"
@@ -1551,9 +1401,7 @@ function CharacterEditor({
           value={
             character.goals
           }
-          onChange={(
-            value,
-          ) =>
+          onChange={(value) =>
             onUpdate({
               goals: value,
             })
@@ -1565,12 +1413,9 @@ function CharacterEditor({
           value={
             character.motivations
           }
-          onChange={(
-            value,
-          ) =>
+          onChange={(value) =>
             onUpdate({
-              motivations:
-                value,
+              motivations: value,
             })
           }
           placeholder="Why do they want it?"
@@ -1580,9 +1425,7 @@ function CharacterEditor({
           value={
             character.fears
           }
-          onChange={(
-            value,
-          ) =>
+          onChange={(value) =>
             onUpdate({
               fears: value,
             })
@@ -1591,7 +1434,6 @@ function CharacterEditor({
         />
       </CharacterSection>
 
-      {/* Notes */}
       <CharacterSection
         title="Writer's notes"
         description="Anything else you want Mnemeona to remember."
@@ -1600,9 +1442,7 @@ function CharacterEditor({
           value={
             character.notes
           }
-          onChange={(
-            value,
-          ) =>
+          onChange={(value) =>
             onUpdate({
               notes: value,
             })
@@ -1611,7 +1451,6 @@ function CharacterEditor({
         />
       </CharacterSection>
 
-      {/* Danger zone */}
       <section
         className="
           mt-12
@@ -1625,9 +1464,7 @@ function CharacterEditor({
             text-destructive
             hover:text-destructive
           "
-          onClick={
-            onDelete
-          }
+          onClick={onDelete}
         >
           <Trash2
             className="
@@ -1681,10 +1518,7 @@ function AliasEditor({
   function handleKeyDown(
     event: KeyboardEvent,
   ) {
-    if (
-      event.key ===
-      "Enter"
-    ) {
+    if (event.key === "Enter") {
       event.preventDefault()
 
       handleAdd()
@@ -1711,16 +1545,11 @@ function AliasEditor({
             "
           >
             <input
-              value={
-                alias
-              }
-              onChange={(
-                event,
-              ) =>
+              value={alias}
+              onChange={(event) =>
                 onUpdate(
                   index,
-                  event.target
-                    .value,
+                  event.target.value,
                 )
               }
               className="
@@ -1751,9 +1580,7 @@ function AliasEditor({
                 hover:text-destructive
               "
               onClick={() =>
-                onRemove(
-                  alias,
-                )
+                onRemove(alias)
               }
               aria-label={`Remove alias ${alias}`}
             >
@@ -1771,15 +1598,10 @@ function AliasEditor({
         "
       >
         <input
-          value={
-            newAlias
-          }
-          onChange={(
-            event,
-          ) =>
+          value={newAlias}
+          onChange={(event) =>
             setNewAlias(
-              event.target
-                .value,
+              event.target.value,
             )
           }
           onKeyDown={
@@ -1806,9 +1628,7 @@ function AliasEditor({
           type="button"
           variant="outline"
           size="sm"
-          onClick={
-            handleAdd
-          }
+          onClick={handleAdd}
           disabled={
             !newAlias.trim()
           }
@@ -1873,29 +1693,25 @@ function CharacterTextarea({
   value,
   onChange,
   placeholder,
+  large = false,
 }: {
   value: string
   onChange: (
     value: string,
   ) => void
   placeholder: string
+  large?: boolean
 }) {
   return (
     <textarea
       value={value}
-      onChange={(
-        event,
-      ) =>
+      onChange={(event) =>
         onChange(
-          event.target
-            .value,
+          event.target.value,
         )
       }
-      placeholder={
-        placeholder
-      }
-      className="
-        min-h-24
+      placeholder={placeholder}
+      className={`
         w-full
         resize-y
         rounded-xl
@@ -1910,7 +1726,12 @@ function CharacterTextarea({
         placeholder:text-muted-foreground
         focus:ring-2
         focus:ring-ring
-      "
+        ${
+          large
+            ? "min-h-[65vh]"
+            : "min-h-24"
+        }
+      `}
     />
   )
 }
@@ -1928,20 +1749,13 @@ function CharacterInput({
 }) {
   return (
     <input
-      value={
-        value
-      }
-      onChange={(
-        event,
-      ) =>
+      value={value}
+      onChange={(event) =>
         onChange(
-          event.target
-            .value,
+          event.target.value,
         )
       }
-      placeholder={
-        placeholder
-      }
+      placeholder={placeholder}
       className="
         h-9
         min-w-0
