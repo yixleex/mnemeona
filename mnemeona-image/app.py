@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import threading
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -11,14 +10,14 @@ from pydantic import BaseModel, Field
 from starlette.responses import Response
 
 from core.config import load_config
-from core.models import GenerationRequest
 from core.registry import ProviderRegistry
+from core.models import GenerationRequest
 from ollama_manager import OllamaGPUManager
 
 
 app = FastAPI(
     title="Mnemeona Image API",
-    version="1.0.0-modular",
+    version="1.0.1-modular",
 )
 
 app.add_middleware(
@@ -43,6 +42,7 @@ registry = ProviderRegistry(_config)
 ollama = OllamaGPUManager(
     _config.get("gpu_coordination", {})
 )
+
 _generation_lock = threading.Lock()
 
 
@@ -67,9 +67,51 @@ class GenerateRequest(BaseModel):
         le=8,
     )
     seed: int | None = None
+
+    # Optional provider override from the main Mnemeona app.
+    # If omitted, the backend's active_provider is used.
+    provider: str | None = None
+
+    # Settings owned by the main Mnemeona app.
     settings: dict[str, Any] = Field(
         default_factory=dict
     )
+
+
+def resolve_provider(provider_id: str | None):
+    if not provider_id:
+        return registry.get_active()
+
+    if provider_id == registry.active_id:
+        return registry.get_active()
+
+    manifests = {
+        item["id"]: item
+        for item in registry.manifests()
+    }
+
+    if provider_id not in manifests:
+        raise RuntimeError(
+            f"Image provider '{provider_id}' is not installed."
+        )
+
+    provider_config = _config.get(
+        "providers", {}
+    ).get(provider_id, {})
+
+    if not provider_config.get("enabled", True):
+        raise RuntimeError(
+            f"Image provider '{provider_id}' is disabled."
+        )
+
+    # Registry exposes providers through its normal loader.
+    original = registry.active_id
+
+    try:
+        registry.config["active_provider"] = provider_id
+        return registry.get_active()
+    finally:
+        registry.config["active_provider"] = original
 
 
 @app.get("/providers")
@@ -119,7 +161,9 @@ def generate(request: GenerateRequest):
                 ollama.unload_for_image_generation()
             )
 
-            provider = registry.get_active()
+            provider = resolve_provider(
+                request.provider
+            )
 
             result = provider.generate(
                 GenerationRequest(
