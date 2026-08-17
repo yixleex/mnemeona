@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
-from urllib.error import URLError, HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -17,39 +16,27 @@ class OllamaConfig:
 
 class OllamaGPUManager:
     """
-    Coordinates VRAM between Ollama and the Mnemeona image service.
+    Optional VRAM coordination layer.
 
-    Before image generation:
-      - inspect Ollama's currently loaded models
-      - unload them with keep_alive=0
-
-    After image generation:
-      - optionally preload the models that were previously running
-
-    Ollama itself is never stopped. Only the model is evicted from memory.
+    This is intentionally independent from image providers.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: dict | None = None) -> None:
+        config = config or {}
+
         self.config = OllamaConfig(
-            enabled=os.getenv(
-                "MNEMEONA_OLLAMA_GPU_COORDINATION",
-                "true",
-            ).strip().lower()
-            not in {"0", "false", "no", "off"},
-            base_url=os.getenv(
-                "MNEMEONA_OLLAMA_URL",
-                "http://127.0.0.1:11434",
-            ).rstrip("/"),
-            reload_after_image=os.getenv(
-                "MNEMEONA_OLLAMA_RELOAD_AFTER_IMAGE",
-                "true",
-            ).strip().lower()
-            not in {"0", "false", "no", "off"},
-            timeout_seconds=float(
-                os.getenv(
-                    "MNEMEONA_OLLAMA_TIMEOUT",
-                    "10",
+            enabled=bool(config.get("enabled", True)),
+            base_url=str(
+                config.get(
+                    "ollama_url",
+                    "http://127.0.0.1:11434",
                 )
+            ).rstrip("/"),
+            reload_after_image=bool(
+                config.get("reload_after_image", True)
+            ),
+            timeout_seconds=float(
+                config.get("timeout_seconds", 10)
             ),
         )
 
@@ -89,48 +76,42 @@ class OllamaGPUManager:
         ) as response:
             raw = response.read()
 
-        if not raw:
-            return {}
-
-        return json.loads(raw.decode("utf-8"))
+        return (
+            json.loads(raw.decode("utf-8"))
+            if raw
+            else {}
+        )
 
     def running_models(self) -> list[str]:
         if not self.enabled:
             return []
 
         try:
-            data = self._request(
-                "GET",
-                "/api/ps",
-            )
-        except (URLError, HTTPError, OSError, ValueError) as exc:
+            data = self._request("GET", "/api/ps")
+        except (
+            URLError,
+            HTTPError,
+            OSError,
+            ValueError,
+        ) as exc:
             print(
-                "Ollama GPU coordination: "
-                f"could not query Ollama: {exc}"
+                f"Ollama GPU coordination query failed: {exc}"
             )
             return []
 
-        models = data.get("models", [])
+        names = []
 
-        names: list[str] = []
-
-        for model in models:
+        for model in data.get("models", []):
             name = (
                 model.get("name")
                 or model.get("model")
             )
-
             if isinstance(name, str) and name:
                 names.append(name)
 
         return names
 
     def unload_for_image_generation(self) -> list[str]:
-        """
-        Evict every currently loaded Ollama model.
-
-        This intentionally does not stop the Ollama service.
-        """
         self._unloaded_models = []
 
         if not self.enabled:
@@ -138,19 +119,8 @@ class OllamaGPUManager:
 
         models = self.running_models()
 
-        if not models:
-            return []
-
-        print(
-            "Ollama GPU coordination: "
-            "unloading models before image generation: "
-            + ", ".join(models)
-        )
-
         for model in models:
             try:
-                # Ollama documents keep_alive=0 as the API way
-                # to unload a model immediately.
                 self._request(
                     "POST",
                     "/api/generate",
@@ -161,9 +131,7 @@ class OllamaGPUManager:
                         "keep_alive": 0,
                     },
                 )
-
                 self._unloaded_models.append(model)
-
             except (
                 URLError,
                 HTTPError,
@@ -171,34 +139,26 @@ class OllamaGPUManager:
                 ValueError,
             ) as exc:
                 print(
-                    "Ollama GPU coordination: "
-                    f"could not unload {model}: {exc}"
+                    f"Could not unload Ollama model "
+                    f"{model}: {exc}"
                 )
 
         return list(self._unloaded_models)
 
     def restore_after_image_generation(self) -> list[str]:
-        """
-        Optionally preload the models that were running before
-        image generation.
-
-        This does not generate story content. It only warms the
-        model back into Ollama memory.
-        """
         models = list(self._unloaded_models)
         self._unloaded_models = []
 
-        if not self.enabled:
+        if (
+            not self.enabled
+            or not self.config.reload_after_image
+        ):
             return []
 
-        if not self.config.reload_after_image:
-            return []
-
-        restored: list[str] = []
+        restored = []
 
         for model in models:
             try:
-                # An empty API request preloads the model.
                 self._request(
                     "POST",
                     "/api/generate",
@@ -208,14 +168,7 @@ class OllamaGPUManager:
                         "stream": False,
                     },
                 )
-
                 restored.append(model)
-
-                print(
-                    "Ollama GPU coordination: "
-                    f"restored {model}"
-                )
-
             except (
                 URLError,
                 HTTPError,
@@ -223,22 +176,20 @@ class OllamaGPUManager:
                 ValueError,
             ) as exc:
                 print(
-                    "Ollama GPU coordination: "
-                    f"could not restore {model}: {exc}"
+                    f"Could not restore Ollama model "
+                    f"{model}: {exc}"
                 )
 
         return restored
 
     def status(self) -> dict:
-        loaded = self.running_models()
-
         return {
             "enabled": self.enabled,
             "ollama_url": self.config.base_url,
             "reload_after_image": (
                 self.config.reload_after_image
             ),
-            "running_models": loaded,
+            "running_models": self.running_models(),
             "unloaded_for_image": list(
                 self._unloaded_models
             ),

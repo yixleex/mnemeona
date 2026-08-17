@@ -1,0 +1,24 @@
+{
+  "active_provider": "lcm",
+  "providers": {
+    "lcm": {
+      "enabled": true,
+      "model_path": "./mnemeona-image/models/LCM_Dreamshaper_v7",
+      "device": "auto",
+      "dtype": "float16",
+      "settings": {
+        "guidance_scale": 8.0,
+        "lcm_origin_steps": 50,
+        "attention_slicing": true,
+        "vae_slicing": true,
+        "vae_tiling": true
+      }
+    }
+  },
+  "gpu_coordination": {
+    "enabled": true,
+    "ollama_url": "http://127.0.0.1:11434",
+    "reload_after_image": true,
+    "timeout_seconds": 10
+  }
+}

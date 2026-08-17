@@ -1,0 +1,8 @@
+{
+  "id": "lcm",
+  "name": "LCM DreamShaper v7",
+  "version": "1.0.0",
+  "type": "local-diffusers",
+  "module": "provider:LCMProvider",
+  "requirements": "requirements.txt"
+}

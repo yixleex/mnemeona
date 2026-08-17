@@ -1,0 +1,108 @@
+# ============================================================
+# Mnemeona Image - Git Ignore
+# ============================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+.env.*
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# ============================================================
+# Local configuration
+# ============================================================
+
+# User-specific image AI configuration
+config/image-ai.json
+
+# Local environment overrides
+*.local.json
+*.local.yaml
+*.local.yml
+
+# ============================================================
+# AI Models
+# ============================================================
+
+# Never commit downloaded model weights
+models/
+*.safetensors
+*.ckpt
+*.bin
+*.pt
+*.pth
+*.onnx
+*.gguf
+*.ggml
+
+# Hugging Face / Diffusers caches
+.cache/
+.huggingface/
+huggingface/
+HF_HOME/
+TRANSFORMERS_CACHE/
+DIFFUSERS_CACHE/
+
+# ============================================================
+# Generated images / outputs
+# ============================================================
+
+output/
+outputs/
+generated/
+generated-images/
+images/
+tmp/
+temp/
+
+# Generated image files if they appear inside this service
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# ============================================================
+# Logs
+# ============================================================
+
+*.log
+logs/
+
+# ============================================================
+# OS / editor
+# ============================================================
+
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Local testing
+# ============================================================
+
+.pytest_cache/
+test-output/
+coverage.xml
