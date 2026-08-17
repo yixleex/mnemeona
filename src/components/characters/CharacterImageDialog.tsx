@@ -10,6 +10,7 @@ import {
   Loader2,
   Plus,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react"
 
@@ -34,6 +35,7 @@ import type {
 } from "@/types/image"
 
 import {
+  deleteImage,
   listProjectImages,
 } from "@/lib/imageDatabase"
 
@@ -52,6 +54,11 @@ interface CharacterImageDialogProps {
     imageId: string,
   ) => void
 
+  onDelete?: (
+    imageId: string,
+    nextPrimaryImageId: string | null,
+  ) => void | Promise<void>
+
   onGenerateImage?: () => void
 }
 
@@ -66,6 +73,7 @@ export function CharacterImageDialog({
   character,
   projectId,
   onSelect,
+  onDelete,
   onGenerateImage,
 }: CharacterImageDialogProps) {
   const [
@@ -86,6 +94,13 @@ export function CharacterImageDialog({
     loading,
     setLoading,
   ] = useState(false)
+
+  const [
+    deletingId,
+    setDeletingId,
+  ] = useState<
+    string | null
+  >(null)
 
   const [
     error,
@@ -118,13 +133,23 @@ export function CharacterImageDialog({
         }
 
         const characterImages =
-          projectImages.filter(
-            (image) =>
-              image.type ===
-                "character" &&
-              image.entityId ===
-                character.id,
-          )
+          projectImages
+            .filter(
+              (image) =>
+                image.type ===
+                  "character" &&
+                image.entityId ===
+                  character.id,
+            )
+            .sort(
+              (a, b) =>
+                new Date(
+                  b.createdAt,
+                ).getTime() -
+                new Date(
+                  a.createdAt,
+                ).getTime(),
+            )
 
         const previews =
           characterImages.map(
@@ -208,8 +233,8 @@ export function CharacterImageDialog({
   ])
 
   /*
-   * Revoke all object URLs when the
-   * dialog closes or images reload.
+   * Revoke object URLs when the image list
+   * is replaced or the dialog unmounts.
    */
   useEffect(() => {
     return () => {
@@ -231,8 +256,134 @@ export function CharacterImageDialog({
             preview.image.id ===
             selectedId,
         ) ?? null,
-      [images, selectedId],
+      [
+        images,
+        selectedId,
+      ],
     )
+
+  async function handleDelete(
+    imageId: string,
+  ) {
+    const image =
+      images.find(
+        (preview) =>
+          preview.image.id ===
+          imageId,
+      )
+
+    if (!image) {
+      return
+    }
+
+    const isPrimary =
+      character.primaryImageId ===
+      imageId
+
+    const confirmed =
+      window.confirm(
+        isPrimary
+          ? "Delete this image? It is currently used as this character's portrait."
+          : "Delete this image permanently?",
+      )
+
+    if (!confirmed) {
+      return
+    }
+
+    setDeletingId(
+      imageId,
+    )
+    setError("")
+
+    try {
+      /*
+       * Determine what should become the
+       * primary image if the current primary
+       * is deleted.
+       *
+       * Because images are sorted newest-first,
+       * the first remaining image is a sensible
+       * fallback.
+       */
+      const remaining =
+        images
+          .filter(
+            (preview) =>
+              preview.image.id !==
+              imageId,
+          )
+
+      const nextPrimaryImageId =
+        isPrimary
+          ? (
+              remaining[0]
+                ?.image.id ??
+              null
+            )
+          : (
+              character.primaryImageId ??
+              remaining[0]
+                ?.image.id ??
+              null
+            )
+
+      /*
+       * Remove the actual image from
+       * IndexedDB.
+       */
+      await deleteImage(
+        imageId,
+      )
+
+      /*
+       * Release its object URL immediately.
+       */
+      URL.revokeObjectURL(
+        image.url,
+      )
+
+      /*
+       * Remove it from the local dialog.
+       */
+      setImages(
+        remaining,
+      )
+
+      /*
+       * Update the selected image.
+       */
+      if (
+        selectedId ===
+        imageId
+      ) {
+        setSelectedId(
+          nextPrimaryImageId,
+        )
+      }
+
+      /*
+       * Tell the parent to update the
+       * character's imageIds and primary
+       * image reference.
+       */
+      await onDelete?.(
+        imageId,
+        nextPrimaryImageId,
+      )
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof
+          Error
+          ? deleteError.message
+          : "Failed to delete the image.",
+      )
+    } finally {
+      setDeletingId(
+        null,
+      )
+    }
+  }
 
   function handleSelect() {
     if (!selectedId) {
@@ -432,7 +583,7 @@ export function CharacterImageDialog({
                     text-destructive
                   "
                 >
-                  Unable to load images
+                  Image operation failed
                 </p>
 
                 <p
@@ -509,9 +660,7 @@ export function CharacterImageDialog({
 
                 {onGenerateImage && (
                   <Button
-                    className="
-                      mt-5
-                    "
+                    className="mt-5"
                     onClick={
                       handleGenerateNew
                     }
@@ -614,19 +763,14 @@ export function CharacterImageDialog({
                         character.primaryImageId ===
                         preview.image.id
 
+                      const deleting =
+                        deletingId ===
+                        preview.image.id
+
                       return (
-                        <button
+                        <div
                           key={
-                            preview.image
-                              .id
-                          }
-                          type="button"
-                          onClick={() =>
-                            setSelectedId(
-                              preview
-                                .image
-                                .id,
-                            )
+                            preview.image.id
                           }
                           className={`
                             group
@@ -635,44 +779,65 @@ export function CharacterImageDialog({
                             rounded-xl
                             border
                             bg-muted
-                            text-left
                             transition
-                            hover:border-foreground/40
                             ${
                               selected
                                 ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
-                                : ""
+                                : "hover:border-foreground/40"
                             }
                           `}
                         >
-                          <div
-                            className="
-                              aspect-[3/4]
-                              w-full
-                            "
-                          >
-                            <img
-                              src={
-                                preview.url
-                              }
-                              alt={
+                          {/* Image selection */}
+                          <button
+                            type="button"
+                            disabled={
+                              deleting
+                            }
+                            onClick={() =>
+                              setSelectedId(
                                 preview
                                   .image
-                                  .name
-                              }
+                                  .id,
+                              )
+                            }
+                            className="
+                              block
+                              w-full
+                              text-left
+                              disabled:cursor-wait
+                            "
+                          >
+                            <div
                               className="
-                                size-full
-                                object-cover
-                                transition
-                                duration-200
-                                group-hover:scale-[1.02]
+                                aspect-[3/4]
+                                w-full
                               "
-                            />
-                          </div>
+                            >
+                              <img
+                                src={
+                                  preview.url
+                                }
+                                alt={
+                                  preview
+                                    .image
+                                    .name
+                                }
+                                className="
+                                  size-full
+                                  object-cover
+                                  transition
+                                  duration-200
+                                  group-hover:scale-[1.02]
+                                "
+                              />
+                            </div>
+                          </button>
 
+                          {/* Selected indicator */}
                           {selected && (
                             <div
                               className="
+                                pointer-events-none
                                 absolute
                                 right-2
                                 top-2
@@ -694,9 +859,11 @@ export function CharacterImageDialog({
                             </div>
                           )}
 
+                          {/* Current portrait */}
                           {primary && (
                             <div
                               className="
+                                pointer-events-none
                                 absolute
                                 bottom-2
                                 left-2
@@ -713,7 +880,52 @@ export function CharacterImageDialog({
                               Current
                             </div>
                           )}
-                        </button>
+
+                          {/* Delete */}
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="icon"
+                            disabled={
+                              deleting
+                            }
+                            aria-label={`Delete ${preview.image.name}`}
+                            title="Delete image"
+                            onClick={() =>
+                              void handleDelete(
+                                preview
+                                  .image
+                                  .id,
+                              )
+                            }
+                            className="
+                              absolute
+                              right-2
+                              bottom-2
+                              size-8
+                              opacity-0
+                              shadow-lg
+                              transition-opacity
+                              group-hover:opacity-100
+                              focus-visible:opacity-100
+                            "
+                          >
+                            {deleting ? (
+                              <Loader2
+                                className="
+                                  size-4
+                                  animate-spin
+                                "
+                              />
+                            ) : (
+                              <Trash2
+                                className="
+                                  size-4
+                                "
+                              />
+                            )}
+                          </Button>
+                        </div>
                       )
                     },
                   )}
@@ -757,39 +969,89 @@ export function CharacterImageDialog({
                     </div>
 
                     <div className="mt-4">
-                      <p
+                      <div
                         className="
-                          truncate
-                          text-sm
-                          font-medium
+                          flex
+                          items-start
+                          justify-between
+                          gap-3
                         "
                       >
-                        {
-                          selectedImage
-                            .image
-                            .name
-                        }
-                      </p>
+                        <div className="min-w-0">
+                          <p
+                            className="
+                              truncate
+                              text-sm
+                              font-medium
+                            "
+                          >
+                            {
+                              selectedImage
+                                .image
+                                .name
+                            }
+                          </p>
 
-                      <p
-                        className="
-                          mt-1
-                          text-[10px]
-                          text-muted-foreground
-                        "
-                      >
-                        {
+                          <p
+                            className="
+                              mt-1
+                              text-[10px]
+                              text-muted-foreground
+                            "
+                          >
+                            {
+                              selectedImage
+                                .image
+                                .width
+                            }{" "}
+                            ×{" "}
+                            {
+                              selectedImage
+                                .image
+                                .height
+                            }
+                          </p>
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon"
+                          disabled={
+                            deletingId ===
+                            selectedImage
+                              .image
+                              .id
+                          }
+                          aria-label="Delete selected image"
+                          title="Delete selected image"
+                          onClick={() =>
+                            void handleDelete(
+                              selectedImage
+                                .image
+                                .id,
+                            )
+                          }
+                          className="
+                            size-8
+                            shrink-0
+                          "
+                        >
+                          {deletingId ===
                           selectedImage
                             .image
-                            .width
-                        }{" "}
-                        ×{" "}
-                        {
-                          selectedImage
-                            .image
-                            .height
-                        }
-                      </p>
+                            .id ? (
+                            <Loader2
+                              className="
+                                size-4
+                                animate-spin
+                              "
+                            />
+                          ) : (
+                            <Trash2 className="size-4" />
+                          )}
+                        </Button>
+                      </div>
 
                       <p
                         className="
@@ -860,10 +1122,10 @@ export function CharacterImageDialog({
                 text-muted-foreground
               "
             >
-              Selecting an image changes the
-              character's primary visual
-              reference. Generated images are
-              kept available.
+              Select an image to use it as
+              the character's primary visual
+              reference. Deleted images are
+              permanently removed.
             </p>
 
             <div
@@ -885,7 +1147,8 @@ export function CharacterImageDialog({
               <Button
                 disabled={
                   !selectedId ||
-                  loading
+                  loading ||
+                  !!deletingId
                 }
                 onClick={
                   handleSelect

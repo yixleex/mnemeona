@@ -39,7 +39,7 @@ import type {
 } from "@/types/image"
 
 import {
-  getImage,
+    deleteImage,
   listProjectImages,
 } from "@/lib/imageDatabase"
 
@@ -415,7 +415,45 @@ export function CharacterDatabase({
     )
   }
 
-  const selectedImageUrl =
+  async function handleCharacterImageDeleted(
+    imageId: string,
+    nextPrimaryImageId: string | null,
+  ) {
+    if (!selectedCharacter) {
+      return
+    }
+
+    const existingIds =
+      selectedCharacter.imageIds ?? []
+
+    const remainingIds =
+      existingIds.filter(
+        (id) =>
+          id !== imageId,
+      )
+
+    updateCharacter(
+      selectedCharacter.id,
+      {
+        imageIds:
+          remainingIds,
+
+        primaryImageId:
+          nextPrimaryImageId ??
+          undefined,
+      },
+    )
+
+    /*
+     * If the deleted image was the portrait,
+     * the next image becomes the portrait.
+     *
+     * If no images remain, primaryImageId is
+     * cleared.
+     */
+  }
+
+    const selectedImageUrl =
     selectedCharacter
       ? imageUrls.get(
           selectedCharacter.id,
@@ -906,32 +944,35 @@ export function CharacterDatabase({
 
       {/* Choose existing image */}
       {selectedCharacter && (
-        <CharacterImageDialog
-          open={
-            characterImageDialogOpen
-          }
-          onOpenChange={
-            setCharacterImageDialogOpen
-          }
-          character={
-            selectedCharacter
-          }
-          projectId={
-            project.id
-          }
-          onSelect={
-            handleCharacterImageSelected
-          }
-          onGenerateImage={() => {
-            setCharacterImageDialogOpen(
-              false,
-            )
+          <CharacterImageDialog
+            open={
+              characterImageDialogOpen
+            }
+            onOpenChange={
+              setCharacterImageDialogOpen
+            }
+            character={
+              selectedCharacter
+            }
+            projectId={
+              project.id
+            }
+            onSelect={
+              handleCharacterImageSelected
+            }
+            onDelete={
+              handleCharacterImageDeleted
+            }
+            onGenerateImage={() => {
+              setCharacterImageDialogOpen(
+                false,
+              )
 
-            setImageDialogOpen(
-              true,
-            )
-          }}
-        />
+              setImageDialogOpen(
+                true,
+              )
+            }}
+          />
       )}
     </div>
   )
