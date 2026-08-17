@@ -1,0 +1,10 @@
+fastapi>=0.116
+uvicorn[standard]>=0.35
+pillow>=11.0
+python-multipart>=0.0.20
+psutil>=6.0
+safetensors>=0.5
+transformers>=4.51
+accelerate>=1.7
+huggingface_hub>=0.32
+diffusers>=0.35

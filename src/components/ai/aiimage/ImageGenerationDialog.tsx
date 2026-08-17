@@ -44,12 +44,11 @@ import {
 
 import {
   generateImage,
-  loadComfyUIConfig,
-  saveComfyUIConfig,
-  testComfyUIConnection,
-  getAvailableCheckpoints,
-  type ComfyUIImageConfig,
-} from "./comfyuiImageProvider"
+  loadZImageConfig,
+  saveZImageConfig,
+  testZImageConnection,
+  type ZImageConfig,
+} from "./zimageImageProvider"
 
 interface ImageGenerationDialogProps {
   open: boolean
@@ -81,7 +80,10 @@ function buildCharacterPrompt(
     []
 
   sections.push(
-    `A high-quality portrait of ${character.name || "this character"}.`,
+    `A high-quality portrait of ${
+      character.name ||
+      "this character"
+    }.`,
   )
 
   if (
@@ -167,17 +169,10 @@ export function ImageGenerationDialog({
     config,
     setConfig,
   ] =
-    useState<ComfyUIImageConfig>(
+    useState<ZImageConfig>(
       () =>
-        loadComfyUIConfig(),
+        loadZImageConfig(),
     )
-
-  const [
-    checkpoints,
-    setCheckpoints,
-  ] = useState<string[]>(
-    [],
-  )
 
   const [
     prompt,
@@ -197,12 +192,7 @@ export function ImageGenerationDialog({
   const [
     steps,
     setSteps,
-  ] = useState(25)
-
-  const [
-    cfg,
-    setCfg,
-  ] = useState(7)
+  ] = useState(8)
 
   const [
     status,
@@ -238,6 +228,13 @@ export function ImageGenerationDialog({
   )
 
   const [
+    generatedSeed,
+    setGeneratedSeed,
+  ] = useState<number | undefined>(
+    undefined,
+  )
+
+  const [
     savedImageId,
     setSavedImageId,
   ] = useState<string | null>(
@@ -253,11 +250,6 @@ export function ImageGenerationDialog({
     testMessage,
     setTestMessage,
   ] = useState("")
-
-  const [
-    loadingModels,
-    setLoadingModels,
-  ] = useState(false)
 
   const [
     showSettings,
@@ -293,7 +285,9 @@ export function ImageGenerationDialog({
         )
       }
     }
-  }, [previewUrl])
+  }, [
+    previewUrl,
+  ])
 
   useEffect(() => {
     if (!open) {
@@ -301,7 +295,7 @@ export function ImageGenerationDialog({
     }
 
     setConfig(
-      loadComfyUIConfig(),
+      loadZImageConfig(),
     )
 
     setPrompt(
@@ -310,10 +304,20 @@ export function ImageGenerationDialog({
       ),
     )
 
+    setWidth(768)
+    setHeight(1024)
+    setSteps(8)
+
     setStatus("idle")
     setProgress(0)
     setError("")
     setGeneratedBlob(null)
+    setGeneratedMimeType(
+      "image/png",
+    )
+    setGeneratedSeed(
+      undefined,
+    )
     setSavedImageId(null)
     setTestMessage("")
   }, [
@@ -322,7 +326,7 @@ export function ImageGenerationDialog({
   ])
 
   function updateConfig(
-    updates: Partial<ComfyUIImageConfig>,
+    updates: Partial<ZImageConfig>,
   ) {
     const next = {
       ...config,
@@ -331,110 +335,32 @@ export function ImageGenerationDialog({
 
     setConfig(next)
 
-    saveComfyUIConfig(
+    saveZImageConfig(
       next,
     )
-  }
-
-  async function loadModels() {
-    setLoadingModels(true)
-    setTestMessage("")
-
-    try {
-      saveComfyUIConfig(
-        config,
-      )
-
-      const models =
-        await getAvailableCheckpoints()
-
-      setCheckpoints(
-        models,
-      )
-
-      if (
-        !config.checkpoint &&
-        models.length
-      ) {
-        updateConfig({
-          checkpoint:
-            models[0],
-        })
-      }
-
-      setTestMessage(
-        models.length
-          ? `${models.length} checkpoint${
-              models.length ===
-              1
-                ? ""
-                : "s"
-            } found.`
-          : "No checkpoints found.",
-      )
-    } catch (loadError) {
-      setTestMessage(
-        loadError instanceof
-          Error
-          ? loadError.message
-          : "Unable to read ComfyUI checkpoints.",
-      )
-    } finally {
-      setLoadingModels(
-        false,
-      )
-    }
   }
 
   async function handleTestConnection() {
     setTesting(true)
     setTestMessage("")
+    setError("")
 
     try {
-      saveComfyUIConfig(
+      saveZImageConfig(
         config,
       )
 
-      await testComfyUIConnection()
-
-      const models =
-        await getAvailableCheckpoints()
-
-      setCheckpoints(
-        models,
-      )
-
-      if (
-        !config.checkpoint &&
-        models.length
-      ) {
-        const next = {
-          ...config,
-          checkpoint:
-            models[0],
-        }
-
-        setConfig(next)
-
-        saveComfyUIConfig(
-          next,
-        )
-      }
+      await testZImageConnection()
 
       setTestMessage(
-        `Connected to ComfyUI. ${models.length} checkpoint${
-          models.length ===
-          1
-            ? ""
-            : "s"
-        } available.`,
+        "Connected to the local Z-Image-Turbo service.",
       )
     } catch (testError) {
       setTestMessage(
         testError instanceof
           Error
           ? testError.message
-          : "ComfyUI connection failed.",
+          : "Z-Image-Turbo connection failed.",
       )
     } finally {
       setTesting(false)
@@ -450,7 +376,7 @@ export function ImageGenerationDialog({
       return
     }
 
-    saveComfyUIConfig(
+    saveZImageConfig(
       config,
     )
 
@@ -468,6 +394,9 @@ export function ImageGenerationDialog({
     setProgress(0)
     setError("")
     setGeneratedBlob(null)
+    setGeneratedSeed(
+      undefined,
+    )
     setSavedImageId(null)
 
     try {
@@ -482,8 +411,6 @@ export function ImageGenerationDialog({
             height,
 
             steps,
-
-            cfg,
 
             signal:
               abortController.signal,
@@ -506,6 +433,10 @@ export function ImageGenerationDialog({
         result.mimeType,
       )
 
+      setGeneratedSeed(
+        result.seed,
+      )
+
       setProgress(100)
       setStatus("success")
     } catch (generationError) {
@@ -516,6 +447,8 @@ export function ImageGenerationDialog({
           "AbortError"
       ) {
         setStatus("idle")
+        setProgress(0)
+
         return
       }
 
@@ -560,7 +493,10 @@ export function ImageGenerationDialog({
           projectId,
 
           name:
-            `${character.name || "Character"} portrait`,
+            `${
+              character.name ||
+              "Character"
+            } portrait`,
 
           type:
             "character",
@@ -619,6 +555,15 @@ export function ImageGenerationDialog({
         character,
       ),
     )
+
+    setGeneratedBlob(null)
+    setGeneratedSeed(
+      undefined,
+    )
+    setSavedImageId(null)
+    setStatus("idle")
+    setError("")
+    setProgress(0)
   }
 
   const generating =
@@ -684,7 +629,7 @@ export function ImageGenerationDialog({
                   {character.name ||
                     "this character"}
                 </span>{" "}
-                through your local ComfyUI installation.
+                using your local Z-Image-Turbo model.
               </DialogDescription>
             </div>
 
@@ -697,6 +642,10 @@ export function ImageGenerationDialog({
                   false,
                 )
               }
+              disabled={
+                generating ||
+                saving
+              }
             >
               <X className="size-4" />
             </Button>
@@ -708,14 +657,28 @@ export function ImageGenerationDialog({
             {/* Preview */}
             <section className="flex min-h-[420px] items-center justify-center border-b bg-muted/20 p-6 lg:border-b-0 lg:border-r">
               {previewUrl ? (
-                <img
-                  src={previewUrl}
-                  alt={`Generated portrait of ${
-                    character.name ||
-                    "character"
-                  }`}
-                  className="max-h-[68vh] max-w-full rounded-xl object-contain shadow-lg"
-                />
+                <div className="flex max-h-[68vh] max-w-full flex-col items-center gap-3">
+                  <img
+                    src={previewUrl}
+                    alt={`Generated portrait of ${
+                      character.name ||
+                      "character"
+                    }`}
+                    className="max-h-[64vh] max-w-full rounded-xl object-contain shadow-lg"
+                  />
+
+                  {generatedSeed !==
+                    undefined && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Seed:{" "}
+                      <span className="font-mono">
+                        {
+                          generatedSeed
+                        }
+                      </span>
+                    </p>
+                  )}
+                </div>
               ) : (
                 <div className="max-w-sm text-center">
                   <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-2xl bg-muted">
@@ -738,7 +701,7 @@ export function ImageGenerationDialog({
 
             {/* Controls */}
             <section className="space-y-5 p-6">
-              {/* ComfyUI settings */}
+              {/* Z-Image settings */}
               <div className="rounded-xl border bg-card p-4">
                 <div className="flex items-start gap-3">
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
@@ -749,16 +712,15 @@ export function ImageGenerationDialog({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">
-                          ComfyUI
+                          Z-Image-Turbo
                         </p>
 
                         <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                          {config.endpoint}
+                          Local image generation
                         </p>
 
                         <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                          {config.checkpoint ||
-                            "Automatic checkpoint"}
+                          {config.endpoint}
                         </p>
                       </div>
 
@@ -770,6 +732,10 @@ export function ImageGenerationDialog({
                             !showSettings,
                           )
                         }
+                        disabled={
+                          generating ||
+                          saving
+                        }
                       >
                         <Settings2 className="mr-1.5 size-3.5" />
                         Settings
@@ -780,14 +746,14 @@ export function ImageGenerationDialog({
                       <div className="mt-4 space-y-3 border-t pt-4">
                         <div className="space-y-1.5">
                           <label
-                            htmlFor="comfyui-endpoint"
+                            htmlFor="zimage-endpoint"
                             className="text-xs font-medium"
                           >
-                            ComfyUI URL
+                            Local image service URL
                           </label>
 
                           <Input
-                            id="comfyui-endpoint"
+                            id="zimage-endpoint"
                             value={
                               config.endpoint
                             }
@@ -801,102 +767,39 @@ export function ImageGenerationDialog({
                                     .value,
                               })
                             }
-                            placeholder="http://127.0.0.1:8188"
+                            placeholder="http://127.0.0.1:8199"
+                            disabled={
+                              generating ||
+                              saving
+                            }
                             className="h-8 text-xs"
                           />
                         </div>
 
-                        <div className="space-y-1.5">
-                          <label
-                            htmlFor="comfyui-checkpoint"
-                            className="text-xs font-medium"
-                          >
-                            Checkpoint
-                          </label>
-
-                          <select
-                            id="comfyui-checkpoint"
-                            value={
-                              config.checkpoint
-                            }
-                            onChange={(
-                              event,
-                            ) =>
-                              updateConfig({
-                                checkpoint:
-                                  event
-                                    .target
-                                    .value,
-                              })
-                            }
-                            className="h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
-                          >
-                            <option value="">
-                              Automatic
-                            </option>
-
-                            {checkpoints.map(
-                              (
-                                checkpoint,
-                              ) => (
-                                <option
-                                  key={
-                                    checkpoint
-                                  }
-                                  value={
-                                    checkpoint
-                                  }
-                                >
-                                  {
-                                    checkpoint
-                                  }
-                                </option>
-                              ),
-                            )}
-                          </select>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={
-                              testing
-                            }
-                            onClick={
-                              handleTestConnection
-                            }
-                          >
-                            {testing ? (
-                              <>
-                                <Loader2 className="mr-2 size-3.5 animate-spin" />
-                                Testing...
-                              </>
-                            ) : (
-                              "Test ComfyUI"
-                            )}
-                          </Button>
-
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={
-                              loadingModels
-                            }
-                            onClick={
-                              loadModels
-                            }
-                          >
-                            {loadingModels ? (
-                              <>
-                                <Loader2 className="mr-2 size-3.5 animate-spin" />
-                                Loading...
-                              </>
-                            ) : (
-                              "Refresh models"
-                            )}
-                          </Button>
-                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            testing ||
+                            generating ||
+                            saving
+                          }
+                          onClick={
+                            handleTestConnection
+                          }
+                        >
+                          {testing ? (
+                            <>
+                              <Loader2 className="mr-2 size-3.5 animate-spin" />
+                              Testing...
+                            </>
+                          ) : (
+                            <>
+                              <Check className="mr-2 size-3.5" />
+                              Test connection
+                            </>
+                          )}
+                        </Button>
 
                         {testMessage && (
                           <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -1026,8 +929,26 @@ export function ImageGenerationDialog({
               </div>
 
               {/* Generation parameters */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
+              <div className="rounded-xl border bg-muted/20 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium">
+                      Turbo generation
+                    </p>
+
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      Z-Image-Turbo is optimized for
+                      fast generation with a small
+                      number of inference steps.
+                    </p>
+                  </div>
+
+                  <div className="shrink-0 rounded-md bg-background px-2 py-1 text-[10px] font-medium">
+                    8 steps
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-1.5">
                   <label
                     htmlFor="image-steps"
                     className="text-xs font-medium"
@@ -1038,8 +959,8 @@ export function ImageGenerationDialog({
                   <Input
                     id="image-steps"
                     type="number"
-                    min={5}
-                    max={50}
+                    min={1}
+                    max={20}
                     value={steps}
                     disabled={
                       generating ||
@@ -1054,44 +975,14 @@ export function ImageGenerationDialog({
                             .target
                             .value,
                         ) ||
-                          25,
+                          8,
                       )
                     }
                   />
-                </div>
 
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="image-cfg"
-                    className="text-xs font-medium"
-                  >
-                    CFG
-                  </label>
-
-                  <Input
-                    id="image-cfg"
-                    type="number"
-                    min={1}
-                    max={20}
-                    step={0.5}
-                    value={cfg}
-                    disabled={
-                      generating ||
-                      saving
-                    }
-                    onChange={(
-                      event,
-                    ) =>
-                      setCfg(
-                        Number(
-                          event
-                            .target
-                            .value,
-                        ) ||
-                          7,
-                      )
-                    }
-                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Recommended: 8
+                  </p>
                 </div>
               </div>
 
@@ -1100,7 +991,7 @@ export function ImageGenerationDialog({
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs">
                     <span className="text-muted-foreground">
-                      Generating through ComfyUI...
+                      Generating with Z-Image-Turbo...
                     </span>
 
                     <span className="font-medium">
@@ -1116,6 +1007,11 @@ export function ImageGenerationDialog({
                       }}
                     />
                   </div>
+
+                  <p className="text-[10px] text-muted-foreground">
+                    Generation runs locally on your
+                    configured NVIDIA GPU.
+                  </p>
                 </div>
               )}
 
@@ -1185,7 +1081,8 @@ export function ImageGenerationDialog({
                         handleGenerate
                       }
                       disabled={
-                        saving
+                        saving ||
+                        testing
                       }
                     >
                       <Sparkles className="mr-2 size-4" />
