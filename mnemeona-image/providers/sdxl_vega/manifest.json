@@ -2,6 +2,7 @@
   "id": "sdxl_vega",
   "name": "Segmind-Vega",
   "version": "1.0.0",
-  "type": "local",
-  "module": "provider:SDXLVegaProvider"
+  "type": "local-diffusers",
+  "module": "provider:SDXLVegaProvider",
+  "requirements": "requirements.txt"
 }

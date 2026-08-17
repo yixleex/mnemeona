@@ -1,7 +1,0 @@
-{
-  "id": "sdxl_lightning",
-  "name": "SDXL Lightning",
-  "version": "1.0.0",
-  "type": "local",
-  "module": "provider:SDXLLightningProvider"
-}

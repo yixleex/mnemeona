@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import gc
+import importlib
+import json
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -10,20 +13,36 @@ from providers.base import ImageProvider
 
 class ProviderRegistry:
     """
-    Central registry and lifecycle manager for image providers.
+    Manifest-driven image provider registry.
 
-    Mnemeona intentionally keeps only ONE image-generation
-    pipeline loaded at a time.
+    Mnemeona keeps provider instances lightweight while ensuring
+    that at most ONE heavyweight image-generation pipeline is
+    resident in VRAM at a time.
 
-    Provider instances themselves are lightweight and may remain
-    registered. Their heavyweight pipelines are what consume VRAM
-    and are explicitly unloaded when switching models.
+    Providers may optionally implement:
+
+        load()
+        unload()
+
+    Generation itself remains provider-specific.
     """
 
-    def __init__(self) -> None:
-        self._providers: dict[
+    def __init__(
+        self,
+        config: dict[str, Any],
+    ) -> None:
+        self.config = config
+
+        self.providers_dir = (
+            Path(__file__)
+            .resolve()
+            .parents[1]
+            / "providers"
+        )
+
+        self._manifests: dict[
             str,
-            type[ImageProvider],
+            dict[str, Any],
         ] = {}
 
         self._instances: dict[
@@ -33,80 +52,297 @@ class ProviderRegistry:
 
         self._loaded_provider_id: str | None = None
 
-    # ------------------------------------------------------------------
-    # Registration
-    # ------------------------------------------------------------------
+        self._discover_manifests()
 
-    def register(
-        self,
-        provider_class: type[ImageProvider],
-    ) -> None:
-        """
-        Register a provider class.
-
-        Registration does not instantiate or load the provider.
-        """
-
-        provider_id = self._get_provider_id(
-            provider_class
+        configured_active = config.get(
+            "active_provider",
+            "",
         )
-
-        if provider_id in self._providers:
-            raise ValueError(
-                f"Provider already registered: "
-                f"{provider_id}"
-            )
-
-        self._providers[provider_id] = (
-            provider_class
-        )
-
-    def unregister(
-        self,
-        provider_id: str,
-    ) -> None:
-        """
-        Completely remove a provider.
-
-        If the provider is loaded, it is unloaded first.
-        """
 
         if (
-            self._loaded_provider_id
-            == provider_id
+            configured_active
+            and configured_active in self._manifests
         ):
-            self.unload(
-                provider_id
-            )
+            self.active_id = configured_active
 
-        self._instances.pop(
-            provider_id,
-            None,
-        )
+        else:
+            self.active_id = self._first_enabled_provider()
 
-        self._providers.pop(
-            provider_id,
-            None,
-        )
+            if self.active_id is not None:
+                self.config[
+                    "active_provider"
+                ] = self.active_id
 
     # ------------------------------------------------------------------
     # Discovery
     # ------------------------------------------------------------------
 
-    def list_providers(
+    def _discover_manifests(self) -> None:
+        self._manifests.clear()
+
+        if not self.providers_dir.exists():
+            return
+
+        for manifest_path in sorted(
+            self.providers_dir.glob(
+                "*/manifest.json"
+            )
+        ):
+            try:
+                with manifest_path.open(
+                    "r",
+                    encoding="utf-8",
+                ) as handle:
+                    manifest = json.load(
+                        handle
+                    )
+
+                if not isinstance(
+                    manifest,
+                    dict,
+                ):
+                    print(
+                        "WARNING: Ignoring invalid "
+                        f"provider manifest: "
+                        f"{manifest_path}"
+                    )
+                    continue
+
+                provider_id = manifest.get(
+                    "id"
+                )
+
+                if not provider_id:
+                    print(
+                        "WARNING: Provider manifest "
+                        f"has no id: "
+                        f"{manifest_path}"
+                    )
+                    continue
+
+                manifest[
+                    "_directory"
+                ] = str(
+                    manifest_path.parent
+                )
+
+                manifest[
+                    "_manifest_path"
+                ] = str(
+                    manifest_path
+                )
+
+                self._manifests[
+                    str(provider_id)
+                ] = manifest
+
+            except Exception as exc:
+                print(
+                    "WARNING: Failed to load provider "
+                    f"manifest {manifest_path}: "
+                    f"{exc}"
+                )
+
+    def _first_enabled_provider(
         self,
-    ) -> list[str]:
-        return sorted(
-            self._providers.keys()
+    ) -> str | None:
+        provider_config = self.config.get(
+            "providers",
+            {},
         )
 
-    def has(
+        for provider_id in sorted(
+            self._manifests.keys()
+        ):
+            settings = provider_config.get(
+                provider_id,
+                {},
+            )
+
+            if settings.get(
+                "enabled",
+                True,
+            ):
+                return provider_id
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Provider construction
+    # ------------------------------------------------------------------
+
+    def _provider_config(
         self,
         provider_id: str,
-    ) -> bool:
-        return (
+    ) -> dict[str, Any]:
+        providers = self.config.setdefault(
+            "providers",
+            {},
+        )
+
+        return dict(
+            providers.get(
+                provider_id,
+                {},
+            )
+        )
+
+    def _load_provider_class(
+        self,
+        provider_id: str,
+    ) -> type[ImageProvider]:
+        manifest = self._manifests.get(
             provider_id
-            in self._providers
+        )
+
+        if manifest is None:
+            raise RuntimeError(
+                f"Unknown image provider: "
+                f"{provider_id}"
+            )
+
+        module_spec = manifest.get(
+            "module"
+        )
+
+        if not module_spec:
+            raise RuntimeError(
+                f"Provider {provider_id} "
+                "does not define a module."
+            )
+
+        if ":" not in module_spec:
+            raise RuntimeError(
+                f"Invalid module declaration "
+                f"for provider {provider_id}: "
+                f"{module_spec}"
+            )
+
+        module_name, class_name = (
+            module_spec.split(
+                ":",
+                1,
+            )
+        )
+
+        provider_dir = Path(
+            manifest["_directory"]
+        )
+
+        provider_file = (
+            provider_dir
+            / f"{module_name}.py"
+        )
+
+        if not provider_file.exists():
+            raise RuntimeError(
+                f"Provider module does not exist: "
+                f"{provider_file}"
+            )
+
+        #
+        # IMPORTANT:
+        #
+        # Every provider gets a unique Python module name.
+        #
+        # We cannot simply import "provider" because LCM,
+        # Vega, and other providers all have their own
+        # provider.py.
+        #
+
+        unique_module_name = (
+            f"mnemeona_provider_"
+            f"{provider_id.replace('-', '_')}"
+        )
+
+        import importlib.util
+        import sys
+
+        spec = (
+            importlib.util.spec_from_file_location(
+                unique_module_name,
+                provider_file,
+            )
+        )
+
+        if spec is None or spec.loader is None:
+            raise RuntimeError(
+                f"Unable to create module spec "
+                f"for provider {provider_id}: "
+                f"{provider_file}"
+            )
+
+        module = (
+            importlib.util.module_from_spec(
+                spec
+            )
+        )
+
+        #
+        # Register the unique module name BEFORE
+        # executing the module. This is important for
+        # decorators, dataclasses and normal Python
+        # module semantics.
+        #
+
+        sys.modules[
+            unique_module_name
+        ] = module
+
+        try:
+            spec.loader.exec_module(
+                module
+            )
+
+        except Exception:
+            sys.modules.pop(
+                unique_module_name,
+                None,
+            )
+            raise
+
+        try:
+            provider_class = getattr(
+                module,
+                class_name,
+            )
+
+        except AttributeError as exc:
+            raise RuntimeError(
+                f"Provider module "
+                f"{provider_file} does not define "
+                f"{class_name}"
+            ) from exc
+
+        if not issubclass(
+            provider_class,
+            ImageProvider,
+        ):
+            raise RuntimeError(
+                f"Provider class "
+                f"{class_name} from "
+                f"{provider_file} does not inherit "
+                "from ImageProvider."
+            )
+
+        return provider_class
+
+    def _create_provider(
+        self,
+        provider_id: str,
+    ) -> ImageProvider:
+        provider_class = (
+            self._load_provider_class(
+                provider_id
+            )
+        )
+
+        config = self._provider_config(
+            provider_id
+        )
+
+        return provider_class(
+            config
         )
 
     # ------------------------------------------------------------------
@@ -117,112 +353,217 @@ class ProviderRegistry:
         self,
         provider_id: str,
     ) -> ImageProvider:
-        """
-        Return the provider instance.
-
-        The provider object is created lazily.
-
-        Creating the provider object does NOT load the
-        model into VRAM.
-        """
-
-        if provider_id not in self._providers:
-            raise KeyError(
+        if provider_id not in self._manifests:
+            raise RuntimeError(
                 f"Unknown image provider: "
                 f"{provider_id}"
             )
 
         if provider_id not in self._instances:
-            provider_class = (
-                self._providers[
-                    provider_id
-                ]
-            )
-
             self._instances[
                 provider_id
-            ] = provider_class()
+            ] = self._create_provider(
+                provider_id
+            )
 
         return self._instances[
             provider_id
         ]
 
     # ------------------------------------------------------------------
-    # Loading
+    # Provider loading
     # ------------------------------------------------------------------
 
-    def load(
+    def _load_instance(
         self,
         provider_id: str,
     ) -> ImageProvider:
-        """
-        Load exactly one provider.
-
-        Any currently loaded provider is completely
-        unloaded BEFORE the requested provider is loaded.
-        """
-
         provider = self.get(
             provider_id
         )
 
+        load_method = getattr(
+            provider,
+            "load",
+            None,
+        )
+
+        if callable(load_method):
+            load_method()
+
+        self._loaded_provider_id = (
+            provider_id
+        )
+
+        return provider
+
+    def ensure_only_loaded(
+        self,
+        provider_id: str,
+    ) -> ImageProvider:
+        """
+        Ensure the requested provider is the only provider
+        with a heavyweight pipeline loaded.
+
+        Switching always unloads the previous provider BEFORE
+        the new provider is loaded.
+        """
+
+        if provider_id not in self._manifests:
+            raise RuntimeError(
+                f"Unknown image provider: "
+                f"{provider_id}"
+            )
+
         #
-        # Already loaded.
+        # If another provider is active, completely release it.
+        #
+
+        if (
+            self._loaded_provider_id
+            != provider_id
+        ):
+            self.unload_all()
+
+        #
+        # If this provider is already loaded, don't reload it.
         #
 
         if (
             self._loaded_provider_id
             == provider_id
         ):
-            return provider
-
-        #
-        # Never allow two image pipelines to occupy
-        # VRAM simultaneously.
-        #
-
-        self.unload_all()
-
-        try:
-            print(
-                f"Loading image provider: "
-                f"{provider_id}"
-            )
-
-            provider.load()
-
-            self._loaded_provider_id = (
+            return self.get(
                 provider_id
             )
 
-            print(
-                f"Image provider loaded: "
-                f"{provider_id}"
-            )
+        #
+        # Load only this provider.
+        #
 
-            self._print_vram_status(
-                prefix="After provider load"
+        try:
+            return self._load_instance(
+                provider_id
             )
-
-            return provider
 
         except Exception:
-            #
-            # A failed load must never leave the
-            # registry claiming that a provider
-            # is loaded.
-            #
-
             self._loaded_provider_id = None
 
             try:
-                provider.unload()
+                provider = self._instances.get(
+                    provider_id
+                )
+
+                if provider is not None:
+                    unload = getattr(
+                        provider,
+                        "unload",
+                        None,
+                    )
+
+                    if callable(unload):
+                        unload()
+
             except Exception:
                 pass
 
             self._cleanup_cuda()
 
             raise
+
+    # ------------------------------------------------------------------
+    # Switching
+    # ------------------------------------------------------------------
+
+    def switch(
+        self,
+        provider_id: str,
+    ) -> dict[str, Any]:
+        """
+        Change the active provider.
+
+        IMPORTANT:
+        Switching does NOT load the new model.
+
+        This means clicking between models in the UI doesn't
+        unnecessarily consume VRAM. The new model is loaded
+        on the first generation request.
+
+        The previous model is unloaded immediately.
+        """
+
+        if provider_id not in self._manifests:
+            raise RuntimeError(
+                f"Unknown image provider: "
+                f"{provider_id}"
+            )
+
+        provider_config = self.config.setdefault(
+            "providers",
+            {},
+        ).setdefault(
+            provider_id,
+            {},
+        )
+
+        if not provider_config.get(
+            "enabled",
+            True,
+        ):
+            raise RuntimeError(
+                f"Image provider "
+                f"'{provider_id}' is disabled."
+            )
+
+        previous_id = self.active_id
+
+        print()
+        print(
+            "=========================================="
+        )
+        print(
+            " Switching image provider"
+        )
+        print(
+            "=========================================="
+        )
+        print(
+            f"Previous active provider: "
+            f"{previous_id}"
+        )
+        print(
+            f"New active provider: "
+            f"{provider_id}"
+        )
+        print()
+
+        #
+        # HARD VRAM BOUNDARY.
+        #
+        # We unload BEFORE changing the active provider.
+        #
+
+        self.unload_all()
+
+        self.active_id = provider_id
+
+        self.config[
+            "active_provider"
+        ] = provider_id
+
+        return {
+            "ok": True,
+            "provider": provider_id,
+            "previous_provider": previous_id,
+            "loaded_provider": (
+                self._loaded_provider_id
+            ),
+            "message": (
+                f"Active provider switched to "
+                f"{provider_id}. "
+                "The model will load on first generation."
+            ),
+        }
 
     # ------------------------------------------------------------------
     # Unloading
@@ -232,10 +573,6 @@ class ProviderRegistry:
         self,
         provider_id: str,
     ) -> None:
-        """
-        Unload one provider and release its GPU memory.
-        """
-
         provider = self._instances.get(
             provider_id
         )
@@ -255,7 +592,15 @@ class ProviderRegistry:
         )
 
         try:
-            provider.unload()
+            unload = getattr(
+                provider,
+                "unload",
+                None,
+            )
+
+            if callable(unload):
+                unload()
+
         finally:
             if (
                 self._loaded_provider_id
@@ -266,18 +611,16 @@ class ProviderRegistry:
             self._cleanup_cuda()
 
         self._print_vram_status(
-            prefix="After provider unload"
+            "After provider unload"
         )
 
     def unload_all(self) -> None:
         """
-        Unload every provider that currently exists.
+        Release every provider pipeline.
 
-        Provider instances remain registered, but their
-        heavy model pipelines are released.
-
-        This method is the hard boundary that guarantees
-        only one image model can occupy VRAM.
+        Provider objects remain registered so configuration and
+        discovery are preserved, but heavyweight model objects
+        are released.
         """
 
         loaded_id = (
@@ -285,38 +628,41 @@ class ProviderRegistry:
         )
 
         #
-        # If we know exactly which provider is loaded,
-        # unload that one first.
+        # First unload the provider the registry knows about.
         #
 
         if loaded_id is not None:
-            provider = (
-                self._instances.get(
-                    loaded_id
-                )
+            provider = self._instances.get(
+                loaded_id
             )
 
             if provider is not None:
-                print(
-                    f"Unloading active image "
-                    f"provider: {loaded_id}"
-                )
-
                 try:
-                    provider.unload()
+                    unload = getattr(
+                        provider,
+                        "unload",
+                        None,
+                    )
+
+                    if callable(unload):
+                        print(
+                            f"Unloading active image "
+                            f"provider: {loaded_id}"
+                        )
+                        unload()
+
                 except Exception as exc:
                     print(
-                        "WARNING: provider unload "
-                        f"failed for {loaded_id}: "
-                        f"{exc}"
+                        "WARNING: Failed to unload "
+                        f"{loaded_id}: {exc}"
                     )
 
         #
-        # Also ask every other provider instance to unload.
+        # Also unload every other instantiated provider.
         #
-        # This protects us if a provider was loaded
-        # outside the registry or if the registry state
-        # became stale.
+        # This is intentionally defensive. If a provider was
+        # loaded without updating registry state, we still
+        # release it.
         #
 
         for provider_id, provider in list(
@@ -326,220 +672,182 @@ class ProviderRegistry:
                 continue
 
             try:
-                provider.unload()
-            except Exception as exc:
-                print(
-                    "WARNING: provider unload "
-                    f"failed for {provider_id}: "
-                    f"{exc}"
+                unload = getattr(
+                    provider,
+                    "unload",
+                    None,
                 )
 
-        #
-        # The registry must not claim that anything
-        # remains loaded.
-        #
+                if callable(unload):
+                    unload()
+
+            except Exception as exc:
+                print(
+                    "WARNING: Failed to unload "
+                    f"{provider_id}: {exc}"
+                )
 
         self._loaded_provider_id = None
-
-        #
-        # Python garbage collection.
-        #
-
-        gc.collect()
-
-        #
-        # CUDA cleanup.
-        #
 
         self._cleanup_cuda()
 
         self._print_vram_status(
-            prefix="After unload_all"
+            "After unload_all"
         )
 
     # ------------------------------------------------------------------
-    # Switching
-    # ------------------------------------------------------------------
-
-    def switch(
-        self,
-        provider_id: str,
-    ) -> ImageProvider:
-        """
-        Switch the active image provider.
-
-        The old provider is fully unloaded before the
-        new provider is loaded.
-        """
-
-        if not self.has(
-            provider_id
-        ):
-            raise KeyError(
-                f"Unknown image provider: "
-                f"{provider_id}"
-            )
-
-        if (
-            self._loaded_provider_id
-            == provider_id
-        ):
-            return self.get(
-                provider_id
-            )
-
-        print()
-        print(
-            "=========================================="
-        )
-        print(
-            " Switching image provider"
-        )
-        print(
-            "=========================================="
-        )
-
-        if (
-            self._loaded_provider_id
-            is not None
-        ):
-            print(
-                "Previous provider:"
-            )
-            print(
-                f"  {self._loaded_provider_id}"
-            )
-
-        print(
-            "New provider:"
-        )
-        print(
-            f"  {provider_id}"
-        )
-        print()
-
-        #
-        # HARD VRAM BOUNDARY.
-        #
-
-        self.unload_all()
-
-        #
-        # Only now load the new provider.
-        #
-
-        return self.load(
-            provider_id
-        )
-
-    # ------------------------------------------------------------------
-    # Lazy loading helper
-    # ------------------------------------------------------------------
-
-    def ensure_only_loaded(
-        self,
-        provider_id: str,
-    ) -> ImageProvider:
-        """
-        Ensure exactly one provider is loaded.
-
-        This is intentionally equivalent to load().
-        """
-
-        return self.load(
-            provider_id
-        )
-
-    # ------------------------------------------------------------------
-    # State
+    # Status
     # ------------------------------------------------------------------
 
     @property
     def loaded_provider_id(
         self,
     ) -> str | None:
-        """
-        ID of the provider whose pipeline is currently
-        considered loaded by the registry.
-        """
-
         return self._loaded_provider_id
 
-    def is_loaded(
+    def get_provider_status(
         self,
         provider_id: str,
-    ) -> bool:
-        return (
-            self._loaded_provider_id
-            == provider_id
+    ) -> dict[str, Any]:
+        if provider_id not in self._manifests:
+            raise RuntimeError(
+                f"Unknown image provider: "
+                f"{provider_id}"
+            )
+
+        provider = self.get(
+            provider_id
         )
 
-    def status(
+        status = dict(
+            provider.status()
+        )
+
+        status.update(
+            {
+                "id": provider_id,
+                "name": self._manifests[
+                    provider_id
+                ].get(
+                    "name",
+                    provider.name,
+                ),
+                "version": self._manifests[
+                    provider_id
+                ].get(
+                    "version",
+                    provider.version,
+                ),
+                "active": (
+                    provider_id
+                    == self.active_id
+                ),
+                "loaded": (
+                    provider_id
+                    == self._loaded_provider_id
+                ),
+            }
+        )
+
+        return status
+
+    def get_settings_schema(
+        self,
+        provider_id: str,
+    ) -> dict[str, Any]:
+        provider = self.get(
+            provider_id
+        )
+
+        return provider.settings_schema()
+
+    def get_status(
         self,
     ) -> dict[str, Any]:
-        """
-        Return registry and VRAM status.
-        """
+        providers: list[
+            dict[str, Any]
+        ] = []
 
-        provider_status: dict[
-            str,
-            Any,
-        ] = {}
-
-        for provider_id in (
-            self._providers
+        for provider_id in sorted(
+            self._manifests.keys()
         ):
+            manifest = self._manifests[
+                provider_id
+            ]
+
+            provider_config = (
+                self.config
+                .get(
+                    "providers",
+                    {},
+                )
+                .get(
+                    provider_id,
+                    {},
+                )
+            )
+
             try:
                 provider = self.get(
                     provider_id
                 )
 
-                provider_status[
-                    provider_id
-                ] = provider.status()
+                provider_status = (
+                    provider.status()
+                )
 
             except Exception as exc:
-                provider_status[
-                    provider_id
-                ] = {
-                    "error": str(exc)
+                provider_status = {
+                    "error": str(exc),
+                    "loaded": False,
                 }
 
-        status: dict[
-            str,
-            Any,
-        ] = {
-            "providers": (
-                self.list_providers()
-            ),
+            providers.append(
+                {
+                    "id": provider_id,
+                    "name": manifest.get(
+                        "name",
+                        provider_id,
+                    ),
+                    "version": manifest.get(
+                        "version",
+                        "1.0.0",
+                    ),
+                    "type": manifest.get(
+                        "type",
+                        "unknown",
+                    ),
+                    "enabled": provider_config.get(
+                        "enabled",
+                        True,
+                    ),
+                    "active": (
+                        provider_id
+                        == self.active_id
+                    ),
+                    "loaded": (
+                        provider_id
+                        == self._loaded_provider_id
+                    ),
+                    "status": provider_status,
+                }
+            )
+
+        return {
+            "active_provider": self.active_id,
             "loaded_provider": (
                 self._loaded_provider_id
             ),
-            "provider_status": (
-                provider_status
-            ),
+            "providers": providers,
+            "cuda": self._cuda_status(),
         }
 
-        status[
-            "cuda"
-        ] = self._cuda_status()
-
-        return status
-
     # ------------------------------------------------------------------
-    # CUDA management
+    # CUDA cleanup
     # ------------------------------------------------------------------
 
     @staticmethod
     def _cleanup_cuda() -> None:
-        """
-        Aggressively release cached CUDA memory.
-
-        This does not forcibly terminate CUDA allocations
-        owned by external processes. It cleans memory owned
-        by this Python process.
-        """
-
         gc.collect()
 
         if not torch.cuda.is_available():
@@ -570,39 +878,38 @@ class ProviderRegistry:
             }
 
         try:
-            device_index = (
+            device = (
                 torch.cuda.current_device()
             )
 
-            device_name = (
-                torch.cuda
-                .get_device_name(
-                    device_index
+            name = (
+                torch.cuda.get_device_name(
+                    device
                 )
             )
 
             free, total = (
                 torch.cuda.mem_get_info(
-                    device_index
+                    device
                 )
             )
 
             allocated = (
                 torch.cuda.memory_allocated(
-                    device_index
+                    device
                 )
             )
 
             reserved = (
                 torch.cuda.memory_reserved(
-                    device_index
+                    device
                 )
             )
 
             return {
                 "available": True,
-                "device": device_index,
-                "name": device_name,
+                "device": device,
+                "name": name,
                 "total_gb": round(
                     total / 1024**3,
                     2,
@@ -648,7 +955,6 @@ class ProviderRegistry:
         if "error" in status:
             print(
                 f"{prefix}: "
-                f"CUDA status error: "
                 f"{status['error']}"
             )
             return
@@ -661,81 +967,4 @@ class ProviderRegistry:
             f"{status['allocated_gb']} GB, "
             f"reserved "
             f"{status['reserved_gb']} GB)"
-        )
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _get_provider_id(
-        provider_class: type[
-            ImageProvider
-        ],
-    ) -> str:
-        """
-        Determine provider ID without requiring the
-        provider's heavy model to be loaded.
-        """
-
-        provider_id = getattr(
-            provider_class,
-            "PROVIDER_ID",
-            None,
-        )
-
-        if provider_id:
-            return str(
-                provider_id
-            )
-
-        provider_id = getattr(
-            provider_class,
-            "id",
-            None,
-        )
-
-        if isinstance(
-            provider_id,
-            str,
-        ):
-            return provider_id
-
-        #
-        # Fall back to instantiating the lightweight
-        # provider object.
-        #
-
-        try:
-            instance = provider_class()
-
-            provider_id = getattr(
-                instance,
-                "id",
-                None,
-            )
-
-            if callable(
-                provider_id
-            ):
-                provider_id = (
-                    provider_id()
-                )
-
-            if provider_id:
-                return str(
-                    provider_id
-                )
-
-        except Exception as exc:
-            raise RuntimeError(
-                "Unable to determine image "
-                "provider ID for "
-                f"{provider_class}: {exc}"
-            ) from exc
-
-        raise RuntimeError(
-            "Image provider does not expose "
-            "a provider ID: "
-            f"{provider_class}"
         )

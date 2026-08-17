@@ -49,79 +49,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
           }
         },
 
-        "sdxl_lightning": {
-            "enabled": True,
-
-            "model_path": (
-                "./models/SDXL-Lightning"
-            ),
-
-            "device": "auto",
-            "dtype": "float16",
-
-            "settings": {
-                "guidance_scale": 0.0,
-                "attention_slicing": True,
-                "vae_slicing": True,
-                "vae_tiling": True
-            }
-        },
-
-        # These providers can be installed later.
-        #
-        # Keeping them disabled until their provider
-        # packages/checkpoints are installed prevents
-        # Mnemeona from trying to load them prematurely.
-
-        "sdxl_hyper": {
-            "enabled": False,
-
-            "model_path": (
-                "./models/SDXL-Hyper"
-            ),
-
-            "device": "auto",
-            "dtype": "float16",
-
-            "settings": {
-                "guidance_scale": 0.0,
-                "attention_slicing": True,
-                "vae_slicing": True,
-                "vae_tiling": True,
-            },
-        },
-
-        "flux_schnell": {
-            "enabled": False,
-
-            "model_path": (
-                "./models/FLUX.1-schnell"
-            ),
-
-            "device": "auto",
-            "dtype": "float16",
-
-            "settings": {
-                "enable_cpu_offload": True,
-                "enable_vae_tiling": True,
-            },
-        },
-
-        "sd35_medium": {
-            "enabled": False,
-
-            "model_path": (
-                "./models/stable-diffusion-3.5-medium"
-            ),
-
-            "device": "auto",
-            "dtype": "float16",
-
-            "settings": {
-                "enable_cpu_offload": True,
-            },
-        },
-    },
 
     "gpu_coordination": {
         "enabled": True,
@@ -131,7 +58,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "reload_after_image": True,
         "timeout_seconds": 10,
     },
-}
+}}
 
 
 def config_path() -> Path:
