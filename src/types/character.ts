@@ -27,7 +27,9 @@ export interface Character {
 
   contextEnabled: boolean
 
-  imageIds?: string[]
+    imageIds?: string[]
+    primaryImageId?: string
+
 
   createdAt: string
   updatedAt: string

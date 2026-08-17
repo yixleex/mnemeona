@@ -292,8 +292,8 @@ export function ImageGenerationDialog({
     )
 
     setWidth(768)
-    setHeight(1024)
-    setSteps(4)
+    setHeight(768)
+    setSteps(8)
 
     setStatus("idle")
     setProgress(0)

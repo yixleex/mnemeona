@@ -1,23 +1,51 @@
-import { useEffect, useMemo, useState } from "react"
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react"
 
 import {
-    ImagePlus,
+  GitBranch,
+  ImageIcon,
+  ImagePlus,
   Plus,
   Search,
-  Users,
-  GitBranch,
   Sparkles,
   Trash2,
+  Users,
   X,
 } from "lucide-react"
+
+import {
+  Button,
+} from "@/components/ui/button"
 
 import {
   ImageGenerationDialog,
 } from "@/components/ai/aiimage/ImageGenerationDialog"
 
-import { Button } from "@/components/ui/button"
-import type { Character } from "@/types/character"
-import { useProject } from "@/context/ProjectContext"
+import {
+  CharacterImageDialog,
+} from "@/components/characters/CharacterImageDialog"
+
+import type {
+  Character,
+} from "@/types/character"
+
+import type {
+  MnemeonaImage,
+} from "@/types/image"
+
+import {
+  getImage,
+  listProjectImages,
+} from "@/lib/imageDatabase"
+
+import {
+  useProject,
+} from "@/context/ProjectContext"
 
 interface CharacterDatabaseProps {
   onOpenRelationships: () => void
@@ -34,79 +62,248 @@ export function CharacterDatabase({
     updateCharacterContext,
   } = useProject()
 
-  const characters = project.characters
+  const characters =
+    project.characters
 
-  const [selectedId, setSelectedId] =
-    useState<string | null>(
-      characters[0]?.id ?? null,
-    )
+  const [
+    selectedId,
+    setSelectedId,
+  ] = useState<
+    string | null
+  >(
+    characters[0]?.id ??
+      null,
+  )
 
-    const [search, setSearch] = useState("")
+  const [
+    search,
+    setSearch,
+  ] = useState("")
 
-    const [
-      imageDialogOpen,
-      setImageDialogOpen,
-    ] = useState(false)
+  const [
+    imageDialogOpen,
+    setImageDialogOpen,
+  ] = useState(false)
+
+  const [
+    characterImageDialogOpen,
+    setCharacterImageDialogOpen,
+  ] = useState(false)
 
   /*
-   * Keep the selected character valid when the
-   * project changes, for example after deleting
-   * the currently selected character or loading
-   * another project.
+   * Map character ID -> primary image.
+   *
+   * This is loaded from IndexedDB because
+   * images are stored separately from the
+   * project data.
+   */
+  const [
+    characterImages,
+    setCharacterImages,
+  ] = useState<
+    Map<string, MnemeonaImage>
+  >(new Map())
+
+  /*
+   * Object URLs used by the UI.
+   */
+  const [
+    imageUrls,
+    setImageUrls,
+  ] = useState<
+    Map<string, string>
+  >(new Map())
+
+  /*
+   * Keep selected character valid.
    */
   useEffect(() => {
     if (
       selectedId &&
       characters.some(
         (character) =>
-          character.id === selectedId,
+          character.id ===
+          selectedId,
       )
     ) {
       return
     }
 
     setSelectedId(
-      characters[0]?.id ?? null,
+      characters[0]?.id ??
+        null,
     )
-  }, [characters, selectedId])
+  }, [
+    characters,
+    selectedId,
+  ])
 
   const selectedCharacter =
     characters.find(
       (character) =>
-        character.id === selectedId,
+        character.id ===
+        selectedId,
     ) ?? null
 
-  const filteredCharacters = useMemo(() => {
-    const query = search
-      .toLowerCase()
-      .trim()
+  /*
+   * Load character images whenever
+   * the project or character data changes.
+   */
+  useEffect(() => {
+    let cancelled = false
 
-    if (!query) {
-      return characters
+    async function loadCharacterImages() {
+      try {
+        const images =
+          await listProjectImages(
+            project.id,
+          )
+
+        if (cancelled) {
+          return
+        }
+
+        const characterImageMap =
+          new Map<
+            string,
+            MnemeonaImage
+          >()
+
+        const urls =
+          new Map<
+            string,
+            string
+          >()
+
+        for (const character of characters) {
+          const available =
+            images
+              .filter(
+                (image) =>
+                  image.type ===
+                    "character" &&
+                  image.entityId ===
+                    character.id,
+              )
+              .sort(
+                (a, b) =>
+                  new Date(
+                    b.createdAt,
+                  ).getTime() -
+                  new Date(
+                    a.createdAt,
+                  ).getTime(),
+              )
+
+          if (!available.length) {
+            continue
+          }
+
+          /*
+           * Prefer explicitly selected image.
+           *
+           * Fall back to newest generated
+           * image for older characters.
+           */
+          const primary =
+            available.find(
+              (image) =>
+                image.id ===
+                character.primaryImageId,
+            ) ??
+            available[0]
+
+          characterImageMap.set(
+            character.id,
+            primary,
+          )
+
+          urls.set(
+            character.id,
+            URL.createObjectURL(
+              primary.blob,
+            ),
+          )
+        }
+
+        setCharacterImages(
+          characterImageMap,
+        )
+
+        setImageUrls(urls)
+      } catch {
+        /*
+         * Image loading should never prevent
+         * the character database itself from
+         * rendering.
+         */
+      }
     }
 
-    return characters.filter(
-      (character) => {
-        return (
-          character.name
-            .toLowerCase()
-            .includes(query) ||
-          character.role
-            .toLowerCase()
-            .includes(query) ||
-          character.aliases.some(
-            (alias) =>
-              alias
-                .toLowerCase()
-                .includes(query),
+    loadCharacterImages()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    project.id,
+    characters,
+  ])
+
+  /*
+   * Revoke object URLs when replaced.
+   */
+  useEffect(() => {
+    return () => {
+      imageUrls.forEach(
+        (url) => {
+          URL.revokeObjectURL(
+            url,
           )
-        )
-      },
-    )
-  }, [characters, search])
+        },
+      )
+    }
+  }, [imageUrls])
+
+  const filteredCharacters =
+    useMemo(() => {
+      const query =
+        search
+          .toLowerCase()
+          .trim()
+
+      if (!query) {
+        return characters
+      }
+
+      return characters.filter(
+        (character) => {
+          return (
+            character.name
+              .toLowerCase()
+              .includes(query) ||
+            character.role
+              .toLowerCase()
+              .includes(query) ||
+            character.aliases.some(
+              (alias) =>
+                alias
+                  .toLowerCase()
+                  .includes(
+                    query,
+                  ),
+            )
+          )
+        },
+      )
+    }, [
+      characters,
+      search,
+    ])
 
   function handleCreateCharacter() {
-    const id = addCharacter()
+    const id =
+      addCharacter()
 
     setSelectedId(id)
   }
@@ -122,21 +319,36 @@ export function CharacterDatabase({
     const nextCharacter =
       characters.find(
         (character) =>
-          character.id !== deletedId,
+          character.id !==
+          deletedId,
       )
 
-    deleteCharacter(deletedId)
+    deleteCharacter(
+      deletedId,
+    )
 
     setSelectedId(
-      nextCharacter?.id ?? null,
+      nextCharacter?.id ??
+        null,
     )
   }
+
   function handleOpenImageGenerator() {
     if (!selectedCharacter) {
       return
     }
 
     setImageDialogOpen(true)
+  }
+
+  function handleOpenCharacterImages() {
+    if (!selectedCharacter) {
+      return
+    }
+
+    setCharacterImageDialogOpen(
+      true,
+    )
   }
 
   function handleImageSaved(
@@ -150,42 +362,112 @@ export function CharacterDatabase({
       selectedCharacter.imageIds ??
       []
 
-    if (
-      existingIds.includes(imageId)
-    ) {
-      return
-    }
-
     updateCharacter(
       selectedCharacter.id,
       {
-        imageIds: [
-          ...existingIds,
+        imageIds:
+          existingIds.includes(
+            imageId,
+          )
+            ? existingIds
+            : [
+                ...existingIds,
+                imageId,
+              ],
+
+        /*
+         * A newly generated image becomes
+         * the active character image.
+         */
+        primaryImageId:
           imageId,
-        ],
       },
     )
   }
 
+  function handleCharacterImageSelected(
+    imageId: string,
+  ) {
+    if (!selectedCharacter) {
+      return
+    }
+
+    const existingIds =
+      selectedCharacter.imageIds ??
+      []
+
+    updateCharacter(
+      selectedCharacter.id,
+      {
+        imageIds:
+          existingIds.includes(
+            imageId,
+          )
+            ? existingIds
+            : [
+                ...existingIds,
+                imageId,
+              ],
+
+        primaryImageId:
+          imageId,
+      },
+    )
+  }
+
+  const selectedImageUrl =
+    selectedCharacter
+      ? imageUrls.get(
+          selectedCharacter.id,
+        )
+      : undefined
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header */}
-      <header className="flex h-16 shrink-0 items-center border-b px-6">
+      <header
+        className="
+          flex
+          h-16
+          shrink-0
+          items-center
+          border-b
+          px-6
+        "
+      >
         <div>
-          <h1 className="text-sm font-medium">
+          <h1
+            className="
+              text-sm
+              font-medium
+            "
+          >
             Characters
           </h1>
 
-          <p className="text-[11px] text-muted-foreground">
+          <p
+            className="
+              text-[11px]
+              text-muted-foreground
+            "
+          >
             {characters.length}{" "}
-            {characters.length === 1
+            {characters.length ===
+            1
               ? "character"
               : "characters"}{" "}
             in your story
           </p>
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div
+          className="
+            ml-auto
+            flex
+            items-center
+            gap-2
+          "
+        >
           <Button
             variant="outline"
             size="sm"
@@ -193,7 +475,12 @@ export function CharacterDatabase({
               onOpenRelationships
             }
           >
-            <GitBranch className="mr-1.5 size-4" />
+            <GitBranch
+              className="
+                mr-1.5
+                size-4
+              "
+            />
             Relationships
           </Button>
 
@@ -204,79 +491,211 @@ export function CharacterDatabase({
               handleCreateCharacter
             }
           >
-            <Plus className="mr-1.5 size-4" />
+            <Plus
+              className="
+                mr-1.5
+                size-4
+              "
+            />
             New character
           </Button>
         </div>
       </header>
 
       {/* Workspace */}
-      <div className="flex min-h-0 flex-1">
+      <div
+        className="
+          flex
+          min-h-0
+          flex-1
+        "
+      >
         {/* Character list */}
-        <aside className="flex w-64 shrink-0 flex-col border-r">
-          {/* Search */}
-          <div className="border-b p-3">
+        <aside
+          className="
+            flex
+            w-64
+            shrink-0
+            flex-col
+            border-r
+          "
+        >
+          <div
+            className="
+              border-b
+              p-3
+            "
+          >
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search
+                className="
+                  absolute
+                  left-2.5
+                  top-1/2
+                  size-4
+                  -translate-y-1/2
+                  text-muted-foreground
+                "
+              />
 
               <input
                 value={search}
-                onChange={(event) =>
+                onChange={(
+                  event,
+                ) =>
                   setSearch(
-                    event.target.value,
+                    event.target
+                      .value,
                   )
                 }
                 placeholder="Search characters..."
-                className="h-9 w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+                className="
+                  h-9
+                  w-full
+                  rounded-lg
+                  border
+                  bg-background
+                  pl-9
+                  pr-3
+                  text-sm
+                  outline-none
+                  transition
+                  focus:ring-2
+                  focus:ring-ring
+                "
               />
             </div>
           </div>
 
-          {/* List */}
-          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          <div
+            className="
+              min-h-0
+              flex-1
+              overflow-y-auto
+              p-2
+            "
+          >
             {filteredCharacters.map(
               (character) => {
                 const active =
                   character.id ===
                   selectedId
 
+                const imageUrl =
+                  imageUrls.get(
+                    character.id,
+                  )
+
                 return (
                   <button
-                    key={character.id}
+                    key={
+                      character.id
+                    }
                     type="button"
                     onClick={() =>
                       setSelectedId(
                         character.id,
                       )
                     }
-                    className={`mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${
-                      active
-                        ? "bg-accent"
-                        : "hover:bg-muted/60"
-                    }`}
+                    className={`
+                      mb-1
+                      flex
+                      w-full
+                      items-center
+                      gap-3
+                      rounded-lg
+                      px-3
+                      py-2.5
+                      text-left
+                      transition
+                      ${
+                        active
+                          ? "bg-accent"
+                          : "hover:bg-muted/60"
+                      }
+                    `}
                   >
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium">
-                      {character.name
-                        .charAt(0)
-                        .toUpperCase()}
+                    {/* Avatar */}
+                    <div
+                      className="
+                        size-9
+                        shrink-0
+                        overflow-hidden
+                        rounded-full
+                        bg-muted
+                      "
+                    >
+                      {imageUrl ? (
+                        <img
+                          src={
+                            imageUrl
+                          }
+                          alt=""
+                          className="
+                            size-full
+                            object-cover
+                          "
+                        />
+                      ) : (
+                        <div
+                          className="
+                            flex
+                            size-full
+                            items-center
+                            justify-center
+                            text-sm
+                            font-medium
+                          "
+                        >
+                          {character.name
+                            .charAt(
+                              0,
+                            )
+                            .toUpperCase() ||
+                            "?"}
+                        </div>
+                      )}
                     </div>
 
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">
+                    <div
+                      className="
+                        min-w-0
+                      "
+                    >
+                      <div
+                        className="
+                          truncate
+                          text-sm
+                          font-medium
+                        "
+                      >
                         {character.name ||
                           "Unnamed character"}
                       </div>
 
-                      <div className="truncate text-xs text-muted-foreground">
+                      <div
+                        className="
+                          truncate
+                          text-xs
+                          text-muted-foreground
+                        "
+                      >
                         {character.role ||
-                          character.aliases[0] ||
+                          character
+                            .aliases[0] ||
                           "No role assigned"}
                       </div>
                     </div>
 
                     {character.contextEnabled && (
                       <div
-                        className="ml-auto size-1.5 shrink-0 rounded-full bg-foreground/60"
+                        className="
+                          ml-auto
+                          size-1.5
+                          shrink-0
+                          rounded-full
+                          bg-foreground/60
+                        "
                         title="Included in AI context"
                       />
                     )}
@@ -287,16 +706,41 @@ export function CharacterDatabase({
 
             {filteredCharacters.length ===
               0 && (
-              <div className="px-3 py-8 text-center">
-                <Users className="mx-auto mb-2 size-5 text-muted-foreground" />
+              <div
+                className="
+                  px-3
+                  py-8
+                  text-center
+                "
+              >
+                <Users
+                  className="
+                    mx-auto
+                    mb-2
+                    size-5
+                    text-muted-foreground
+                  "
+                />
 
-                <p className="text-sm font-medium">
-                  {characters.length === 0
+                <p
+                  className="
+                    text-sm
+                    font-medium
+                  "
+                >
+                  {characters.length ===
+                  0
                     ? "No characters yet"
                     : "No characters found"}
                 </p>
 
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p
+                  className="
+                    mt-1
+                    text-xs
+                    text-muted-foreground
+                  "
+                >
                   {characters.length ===
                   0
                     ? "Create your first character to begin."
@@ -312,7 +756,12 @@ export function CharacterDatabase({
                       handleCreateCharacter
                     }
                   >
-                    <Plus className="mr-2 size-4" />
+                    <Plus
+                      className="
+                        mr-2
+                        size-4
+                      "
+                    />
                     Create character
                   </Button>
                 )}
@@ -322,47 +771,96 @@ export function CharacterDatabase({
         </aside>
 
         {/* Character editor */}
-        <main className="min-w-0 flex-1 overflow-y-auto">
+        <main
+          className="
+            min-w-0
+            flex-1
+            overflow-y-auto
+          "
+        >
           {selectedCharacter ? (
-              <CharacterEditor
-                character={
-                  selectedCharacter
-                }
-                onUpdate={(updates) =>
-                  updateCharacter(
-                    selectedCharacter.id,
-                    updates,
-                  )
-                }
-                onDelete={
-                  handleDeleteCharacter
-                }
-                onContextToggle={(
+            <CharacterEditor
+              character={
+                selectedCharacter
+              }
+              imageUrl={
+                selectedImageUrl
+              }
+              hasImages={
+                !!selectedCharacter.imageIds?.length ||
+                !!characterImages.get(
+                  selectedCharacter.id,
+                )
+              }
+              onUpdate={(
+                updates,
+              ) =>
+                updateCharacter(
+                  selectedCharacter.id,
+                  updates,
+                )
+              }
+              onDelete={
+                handleDeleteCharacter
+              }
+              onContextToggle={(
+                enabled,
+              ) =>
+                updateCharacterContext(
+                  selectedCharacter.id,
                   enabled,
-                ) =>
-                  updateCharacterContext(
-                    selectedCharacter.id,
-                    enabled,
-                  )
-                }
-                onGenerateImage={
-                  handleOpenImageGenerator
-                }
-              />
+                )
+              }
+              onGenerateImage={
+                handleOpenImageGenerator
+              }
+              onChangeImage={
+                handleOpenCharacterImages
+              }
+            />
           ) : (
-            <div className="flex h-full items-center justify-center">
+            <div
+              className="
+                flex
+                h-full
+                items-center
+                justify-center
+              "
+            >
               <div className="text-center">
-                <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-accent">
+                <div
+                  className="
+                    mx-auto
+                    mb-4
+                    flex
+                    size-12
+                    items-center
+                    justify-center
+                    rounded-2xl
+                    bg-accent
+                  "
+                >
                   <Users className="size-5" />
                 </div>
 
-                <h2 className="text-sm font-medium">
+                <h2
+                  className="
+                    text-sm
+                    font-medium
+                  "
+                >
                   No characters yet
                 </h2>
 
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Create your first character
-                  to begin.
+                <p
+                  className="
+                    mt-1
+                    text-sm
+                    text-muted-foreground
+                  "
+                >
+                  Create your first
+                  character to begin.
                 </p>
 
                 <Button
@@ -371,39 +869,80 @@ export function CharacterDatabase({
                     handleCreateCharacter
                   }
                 >
-                  <Plus className="mr-2 size-4" />
+                  <Plus
+                    className="
+                      mr-2
+                      size-4
+                    "
+                  />
                   Create character
                 </Button>
               </div>
             </div>
           )}
         </main>
-          </div>
-          {selectedCharacter && (
-            <ImageGenerationDialog
-              open={
-                imageDialogOpen
-              }
-              onOpenChange={
-                setImageDialogOpen
-              }
-              character={
-                selectedCharacter
-              }
-              projectId={
-                project.id
-              }
-              onImageSaved={
-                handleImageSaved
-              }
-            />
-          )}
+      </div>
+
+      {/* Generate image */}
+      {selectedCharacter && (
+        <ImageGenerationDialog
+          open={
+            imageDialogOpen
+          }
+          onOpenChange={
+            setImageDialogOpen
+          }
+          character={
+            selectedCharacter
+          }
+          projectId={
+            project.id
+          }
+          onImageSaved={
+            handleImageSaved
+          }
+        />
+      )}
+
+      {/* Choose existing image */}
+      {selectedCharacter && (
+        <CharacterImageDialog
+          open={
+            characterImageDialogOpen
+          }
+          onOpenChange={
+            setCharacterImageDialogOpen
+          }
+          character={
+            selectedCharacter
+          }
+          projectId={
+            project.id
+          }
+          onSelect={
+            handleCharacterImageSelected
+          }
+          onGenerateImage={() => {
+            setCharacterImageDialogOpen(
+              false,
+            )
+
+            setImageDialogOpen(
+              true,
+            )
+          }}
+        />
+      )}
     </div>
   )
 }
 
 interface CharacterEditorProps {
   character: Character
+
+  imageUrl?: string
+
+  hasImages: boolean
 
   onUpdate: (
     updates: Partial<Character>,
@@ -416,17 +955,25 @@ interface CharacterEditorProps {
   ) => void
 
   onGenerateImage: () => void
+
+  onChangeImage: () => void
 }
 
 function CharacterEditor({
   character,
+  imageUrl,
+  hasImages,
   onUpdate,
   onDelete,
-    onContextToggle,
-    onGenerateImage,
+  onContextToggle,
+  onGenerateImage,
+  onChangeImage,
 }: CharacterEditorProps) {
-  function addAlias(value: string) {
-    const alias = value.trim()
+  function addAlias(
+    value: string,
+  ) {
+    const alias =
+      value.trim()
 
     if (!alias) {
       return
@@ -435,7 +982,8 @@ function CharacterEditor({
     const alreadyExists =
       character.aliases.some(
         (existing) =>
-          existing.toLowerCase() ===
+          existing
+            .toLowerCase() ===
           alias.toLowerCase(),
       )
 
@@ -455,10 +1003,12 @@ function CharacterEditor({
     aliasToRemove: string,
   ) {
     onUpdate({
-      aliases: character.aliases.filter(
-        (alias) =>
-          alias !== aliasToRemove,
-      ),
+      aliases:
+        character.aliases.filter(
+          (alias) =>
+            alias !==
+            aliasToRemove,
+        ),
     })
   }
 
@@ -478,48 +1028,181 @@ function CharacterEditor({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-8">
+    <div
+      className="
+        mx-auto
+        max-w-3xl
+        px-8
+        py-8
+      "
+    >
       {/* Character heading */}
-      <div className="mb-8 flex items-center gap-4">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-muted text-lg font-semibold">
-          {character.name
-            .charAt(0)
-            .toUpperCase() || "?"}
+      <div
+        className="
+          mb-8
+          flex
+          items-start
+          gap-4
+        "
+      >
+        {/* Large character image */}
+        <div
+          className="
+            relative
+            size-24
+            shrink-0
+            overflow-hidden
+            rounded-2xl
+            border
+            bg-muted
+            shadow-sm
+          "
+        >
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt={
+                character.name ||
+                "Character"
+              }
+              className="
+                size-full
+                object-cover
+              "
+            />
+          ) : (
+            <div
+              className="
+                flex
+                size-full
+                items-center
+                justify-center
+                text-3xl
+                font-semibold
+                text-muted-foreground
+              "
+            >
+              {character.name
+                .charAt(
+                  0,
+                )
+                .toUpperCase() ||
+                "?"}
+            </div>
+          )}
         </div>
 
-        <div className="min-w-0 flex-1">
+        <div
+          className="
+            min-w-0
+            flex-1
+          "
+        >
           <input
-            value={character.name}
-            onChange={(event) =>
+            value={
+              character.name
+            }
+            onChange={(
+              event,
+            ) =>
               onUpdate({
-                name: event.target.value,
+                name:
+                  event.target
+                    .value,
               })
             }
-            className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none"
+            className="
+              w-full
+              bg-transparent
+              text-2xl
+              font-semibold
+              tracking-tight
+              outline-none
+            "
             placeholder="Character name"
           />
 
           <input
-            value={character.role}
-            onChange={(event) =>
+            value={
+              character.role
+            }
+            onChange={(
+              event,
+            ) =>
               onUpdate({
-                role: event.target.value,
+                role:
+                  event.target
+                    .value,
               })
             }
-            className="mt-1 w-full bg-transparent text-sm text-muted-foreground outline-none"
+            className="
+              mt-1
+              w-full
+              bg-transparent
+              text-sm
+              text-muted-foreground
+              outline-none
+            "
             placeholder="Role — protagonist, antagonist, mentor..."
-            />
+          />
 
+          {/* Image controls */}
+          <div
+            className="
+              mt-3
+              flex
+              flex-wrap
+              items-center
+              gap-2
+            "
+          >
             <Button
-            variant="outline"
-            onClick={
+              variant="outline"
+              size="sm"
+              onClick={
                 onGenerateImage
-            }
+              }
             >
-            <ImagePlus className="mr-2 size-4" />
-
-                Generate image
+              <ImagePlus
+                className="
+                  mr-2
+                  size-4
+                "
+              />
+              Generate image
             </Button>
+
+            {hasImages && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={
+                  onChangeImage
+                }
+              >
+                <ImageIcon
+                  className="
+                    mr-2
+                    size-4
+                  "
+                />
+                Change image
+              </Button>
+            )}
+          </div>
+
+          {hasImages && (
+            <p
+              className="
+                mt-2
+                text-[10px]
+                text-muted-foreground
+              "
+            >
+              Choose from your generated
+              character images at any time.
+            </p>
+          )}
         </div>
       </div>
 
@@ -529,34 +1212,95 @@ function CharacterEditor({
         description="Other names, nicknames, titles, or names this character may be called."
       >
         <AliasEditor
-          aliases={character.aliases}
-          onAdd={addAlias}
-          onRemove={removeAlias}
-          onUpdate={updateAlias}
+          aliases={
+            character.aliases
+          }
+          onAdd={
+            addAlias
+          }
+          onRemove={
+            removeAlias
+          }
+          onUpdate={
+            updateAlias
+          }
         />
 
-        <p className="text-[11px] leading-5 text-muted-foreground">
-          Mnemeona will use these aliases when
-          detecting this character in your
-          manuscript.
+        <p
+          className="
+            text-[11px]
+            leading-5
+            text-muted-foreground
+          "
+        >
+          Mnemeona will use these aliases
+          when detecting this character in
+          your manuscript.
         </p>
       </CharacterSection>
 
       {/* AI context */}
-      <section className="mt-8 rounded-xl border bg-muted/30 p-4">
-        <div className="flex items-start gap-3">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background">
+      <section
+        className="
+          mt-8
+          rounded-xl
+          border
+          bg-muted/30
+          p-4
+        "
+      >
+        <div
+          className="
+            flex
+            items-start
+            gap-3
+          "
+        >
+          <div
+            className="
+              flex
+              size-8
+              shrink-0
+              items-center
+              justify-center
+              rounded-lg
+              bg-background
+            "
+          >
             <Sparkles className="size-4" />
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-4">
+          <div
+            className="
+              min-w-0
+              flex-1
+            "
+          >
+            <div
+              className="
+                flex
+                items-center
+                justify-between
+                gap-4
+              "
+            >
               <div>
-                <p className="text-sm font-medium">
+                <p
+                  className="
+                    text-sm
+                    font-medium
+                  "
+                >
                   AI story context
                 </p>
 
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <p
+                  className="
+                    mt-0.5
+                    text-xs
+                    text-muted-foreground
+                  "
+                >
                   Mnemeona can use this
                   character when generating
                   or discussing your story.
@@ -578,18 +1322,35 @@ function CharacterEditor({
                     !character.contextEnabled,
                   )
                 }
-                className={`relative h-6 w-11 shrink-0 rounded-full transition ${
-                  character.contextEnabled
-                    ? "bg-foreground"
-                    : "bg-muted-foreground/30"
-                }`}
+                className={`
+                  relative
+                  h-6
+                  w-11
+                  shrink-0
+                  rounded-full
+                  transition
+                  ${
+                    character.contextEnabled
+                      ? "bg-foreground"
+                      : "bg-muted-foreground/30"
+                  }
+                `}
               >
                 <span
-                  className={`absolute top-1 size-4 rounded-full bg-background shadow-sm transition ${
-                    character.contextEnabled
-                      ? "left-6"
-                      : "left-1"
-                  }`}
+                  className={`
+                    absolute
+                    top-1
+                    size-4
+                    rounded-full
+                    bg-background
+                    shadow-sm
+                    transition
+                    ${
+                      character.contextEnabled
+                        ? "left-6"
+                        : "left-1"
+                    }
+                  `}
                 />
               </button>
             </div>
@@ -603,8 +1364,12 @@ function CharacterEditor({
         description="The essential information Mnemeona should know."
       >
         <CharacterTextarea
-          value={character.summary}
-          onChange={(value) =>
+          value={
+            character.summary
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
               summary: value,
             })
@@ -619,8 +1384,12 @@ function CharacterEditor({
         description="How old is the character"
       >
         <CharacterInput
-          value={character.age}
-          onChange={(value) =>
+          value={
+            character.age
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
               age: value,
             })
@@ -635,8 +1404,12 @@ function CharacterEditor({
         description="How they think, behave, speak, and react."
       >
         <CharacterTextarea
-          value={character.personality}
-          onChange={(value) =>
+          value={
+            character.personality
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
               personality: value,
             })
@@ -651,8 +1424,12 @@ function CharacterEditor({
         description="Physical traits and visual details."
       >
         <CharacterTextarea
-          value={character.appearance}
-          onChange={(value) =>
+          value={
+            character.appearance
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
               appearance: value,
             })
@@ -667,8 +1444,12 @@ function CharacterEditor({
         description="History, upbringing, and important past events."
       >
         <CharacterTextarea
-          value={character.background}
-          onChange={(value) =>
+          value={
+            character.background
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
               background: value,
             })
@@ -683,8 +1464,12 @@ function CharacterEditor({
         description="What drives them forward?"
       >
         <CharacterTextarea
-          value={character.goals}
-          onChange={(value) =>
+          value={
+            character.goals
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
               goals: value,
             })
@@ -693,18 +1478,27 @@ function CharacterEditor({
         />
 
         <CharacterTextarea
-          value={character.motivations}
-          onChange={(value) =>
+          value={
+            character.motivations
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
-              motivations: value,
+              motivations:
+                value,
             })
           }
           placeholder="Why do they want it?"
         />
 
         <CharacterTextarea
-          value={character.fears}
-          onChange={(value) =>
+          value={
+            character.fears
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
               fears: value,
             })
@@ -719,8 +1513,12 @@ function CharacterEditor({
         description="Anything else you want Mnemeona to remember."
       >
         <CharacterTextarea
-          value={character.notes}
-          onChange={(value) =>
+          value={
+            character.notes
+          }
+          onChange={(
+            value,
+          ) =>
             onUpdate({
               notes: value,
             })
@@ -730,13 +1528,29 @@ function CharacterEditor({
       </CharacterSection>
 
       {/* Danger zone */}
-      <section className="mt-12 border-t pt-6">
+      <section
+        className="
+          mt-12
+          border-t
+          pt-6
+        "
+      >
         <Button
           variant="ghost"
-          className="text-destructive hover:text-destructive"
-          onClick={onDelete}
+          className="
+            text-destructive
+            hover:text-destructive
+          "
+          onClick={
+            onDelete
+          }
         >
-          <Trash2 className="mr-2 size-4" />
+          <Trash2
+            className="
+              mr-2
+              size-4
+            "
+          />
           Delete character
         </Button>
       </section>
@@ -751,15 +1565,21 @@ function AliasEditor({
   onUpdate,
 }: {
   aliases: string[]
-  onAdd: (value: string) => void
-  onRemove: (value: string) => void
+  onAdd: (
+    value: string,
+  ) => void
+  onRemove: (
+    value: string,
+  ) => void
   onUpdate: (
     index: number,
     value: string,
   ) => void
 }) {
-  const [newAlias, setNewAlias] =
-    useState("")
+  const [
+    newAlias,
+    setNewAlias,
+  ] = useState("")
 
   function handleAdd() {
     const value =
@@ -770,35 +1590,69 @@ function AliasEditor({
     }
 
     onAdd(value)
+
     setNewAlias("")
   }
 
   function handleKeyDown(
-    event: React.KeyboardEvent,
+    event: KeyboardEvent,
   ) {
-    if (event.key === "Enter") {
+    if (
+      event.key ===
+      "Enter"
+    ) {
       event.preventDefault()
+
       handleAdd()
     }
   }
 
   return (
-    <div className="space-y-2">
+    <div
+      className="
+        space-y-2
+      "
+    >
       {aliases.map(
-        (alias, index) => (
+        (
+          alias,
+          index,
+        ) => (
           <div
             key={`${alias}-${index}`}
-            className="flex items-center gap-2"
+            className="
+              flex
+              items-center
+              gap-2
+            "
           >
             <input
-              value={alias}
-              onChange={(event) =>
+              value={
+                alias
+              }
+              onChange={(
+                event,
+              ) =>
                 onUpdate(
                   index,
-                  event.target.value,
+                  event.target
+                    .value,
                 )
               }
-              className="h-9 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+              className="
+                h-9
+                min-w-0
+                flex-1
+                rounded-lg
+                border
+                bg-background
+                px-3
+                text-sm
+                outline-none
+                transition
+                focus:ring-2
+                focus:ring-ring
+              "
               placeholder="Alias"
             />
 
@@ -806,9 +1660,16 @@ function AliasEditor({
               type="button"
               variant="ghost"
               size="icon"
-              className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+              className="
+                size-8
+                shrink-0
+                text-muted-foreground
+                hover:text-destructive
+              "
               onClick={() =>
-                onRemove(alias)
+                onRemove(
+                  alias,
+                )
               }
               aria-label={`Remove alias ${alias}`}
             >
@@ -818,16 +1679,42 @@ function AliasEditor({
         ),
       )}
 
-      <div className="flex items-center gap-2">
+      <div
+        className="
+          flex
+          items-center
+          gap-2
+        "
+      >
         <input
-          value={newAlias}
-          onChange={(event) =>
+          value={
+            newAlias
+          }
+          onChange={(
+            event,
+          ) =>
             setNewAlias(
-              event.target.value,
+              event.target
+                .value,
             )
           }
-          onKeyDown={handleKeyDown}
-          className="h-9 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+          onKeyDown={
+            handleKeyDown
+          }
+          className="
+            h-9
+            min-w-0
+            flex-1
+            rounded-lg
+            border
+            bg-background
+            px-3
+            text-sm
+            outline-none
+            transition
+            focus:ring-2
+            focus:ring-ring
+          "
           placeholder="Add an alias..."
         />
 
@@ -835,10 +1722,19 @@ function AliasEditor({
           type="button"
           variant="outline"
           size="sm"
-          onClick={handleAdd}
-          disabled={!newAlias.trim()}
+          onClick={
+            handleAdd
+          }
+          disabled={
+            !newAlias.trim()
+          }
         >
-          <Plus className="mr-1.5 size-4" />
+          <Plus
+            className="
+              mr-1.5
+              size-4
+            "
+          />
           Add
         </Button>
       </div>
@@ -853,21 +1749,36 @@ function CharacterSection({
 }: {
   title: string
   description: string
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <section className="mt-8">
       <div className="mb-3">
-        <h3 className="text-sm font-medium">
+        <h3
+          className="
+            text-sm
+            font-medium
+          "
+        >
           {title}
         </h3>
 
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p
+          className="
+            mt-0.5
+            text-xs
+            text-muted-foreground
+          "
+        >
           {description}
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div
+        className="
+          space-y-3
+        "
+      >
         {children}
       </div>
     </section>
@@ -880,17 +1791,42 @@ function CharacterTextarea({
   placeholder,
 }: {
   value: string
-  onChange: (value: string) => void
+  onChange: (
+    value: string,
+  ) => void
   placeholder: string
 }) {
   return (
     <textarea
       value={value}
-      onChange={(event) =>
-        onChange(event.target.value)
+      onChange={(
+        event,
+      ) =>
+        onChange(
+          event.target
+            .value,
+        )
       }
-      placeholder={placeholder}
-      className="min-h-24 w-full resize-y rounded-xl border bg-background px-4 py-3 text-sm leading-6 outline-none transition placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
+      placeholder={
+        placeholder
+      }
+      className="
+        min-h-24
+        w-full
+        resize-y
+        rounded-xl
+        border
+        bg-background
+        px-4
+        py-3
+        text-sm
+        leading-6
+        outline-none
+        transition
+        placeholder:text-muted-foreground
+        focus:ring-2
+        focus:ring-ring
+      "
     />
   )
 }
@@ -901,17 +1837,41 @@ function CharacterInput({
   placeholder,
 }: {
   value: string
-  onChange: (value: string) => void
+  onChange: (
+    value: string,
+  ) => void
   placeholder: string
 }) {
   return (
     <input
-      value={value}
-      onChange={(event) =>
-        onChange(event.target.value)
+      value={
+        value
       }
-      placeholder={placeholder}
-      className="h-9 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring"
+      onChange={(
+        event,
+      ) =>
+        onChange(
+          event.target
+            .value,
+        )
+      }
+      placeholder={
+        placeholder
+      }
+      className="
+        h-9
+        min-w-0
+        flex-1
+        rounded-lg
+        border
+        bg-background
+        px-3
+        text-sm
+        outline-none
+        transition
+        focus:ring-2
+        focus:ring-ring
+      "
     />
   )
 }
