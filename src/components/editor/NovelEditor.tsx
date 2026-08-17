@@ -1,4 +1,8 @@
-import { useEffect, useState } from "react"
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 
 import {
   EditorContent,
@@ -9,7 +13,12 @@ import StarterKit from "@tiptap/starter-kit"
 import Underline from "@tiptap/extension-underline"
 import Placeholder from "@tiptap/extension-placeholder"
 
-import { Loader2 } from "lucide-react"
+import {
+  Loader2,
+  Square,
+} from "lucide-react"
+
+import { Button } from "@/components/ui/button"
 
 import { useProject } from "@/context/ProjectContext"
 
@@ -34,6 +43,17 @@ export function NovelEditor() {
     aiGenerating,
     setAIGenerating,
   ] = useState(false)
+
+  /*
+   * The AbortController belongs to the current
+   * Continue Writing generation.
+   *
+   * This allows the Stop AI button to cancel the
+   * actual network stream rather than merely changing
+   * the UI state.
+   */
+  const continueAbortController =
+    useRef<AbortController | null>(null)
 
   const editor =
     useEditor({
@@ -90,6 +110,16 @@ export function NovelEditor() {
       return
     }
 
+    /*
+     * If a generation is running and the user switches
+     * scenes, cancel the generation before loading the
+     * new scene.
+     */
+    continueAbortController.current?.abort()
+    continueAbortController.current = null
+
+    setAIGenerating(false)
+
     if (!activeScene) {
       editor.commands.clearContent()
       return
@@ -111,6 +141,17 @@ export function NovelEditor() {
   ])
 
   // --------------------------------------------------
+  // Cancel generation when editor unmounts
+  // --------------------------------------------------
+
+  useEffect(() => {
+    return () => {
+      continueAbortController.current?.abort()
+      continueAbortController.current = null
+    }
+  }, [])
+
+  // --------------------------------------------------
   // Save editor changes
   // --------------------------------------------------
 
@@ -127,8 +168,11 @@ export function NovelEditor() {
 
     const handleUpdate = () => {
       /*
-       * Never save editor changes while AI
-       * generation is controlling the editor.
+       * Never save normal editor updates while AI
+       * generation is controlling the document.
+       *
+       * Continue Writing explicitly saves its
+       * completed or partially generated document.
        */
       if (aiGenerating) {
         return
@@ -159,6 +203,21 @@ export function NovelEditor() {
   ])
 
   // --------------------------------------------------
+  // Stop AI Continue Writing
+  // --------------------------------------------------
+
+  const stopAIContinue = () => {
+    const controller =
+      continueAbortController.current
+
+    if (!controller) {
+      return
+    }
+
+    controller.abort()
+  }
+
+  // --------------------------------------------------
   // AI Continue Writing
   // --------------------------------------------------
 
@@ -176,6 +235,16 @@ export function NovelEditor() {
           return
         }
 
+        /*
+         * Create a fresh AbortController for this
+         * specific generation.
+         */
+        const controller =
+          new AbortController()
+
+        continueAbortController.current =
+          controller
+
         setAIGenerating(
           true,
         )
@@ -189,22 +258,14 @@ export function NovelEditor() {
 
         /*
          * Read the current scene-specific context.
-         *
-         * This is also loaded at generation time so
-         * changing it in the AI Context panel does not
-         * require the editor to be recreated.
          */
-         const sceneAIContext =
-           activeScene.aiAdditionalContext
-             ?.trim() ?? ""
+        const sceneAIContext =
+          activeScene.aiAdditionalContext
+            ?.trim() ?? ""
 
         /*
          * Continue must ALWAYS start from the actual
          * end of the document.
-         *
-         * Do NOT use editor.state.selection.from
-         * because the author's cursor may be somewhere
-         * in the middle of a long scene.
          */
         const documentEnd =
           editor.state.doc.content.size
@@ -258,23 +319,14 @@ ${sceneAIContext}`
         /*
          * This position is deliberately initialized
          * to the TRUE end of the document.
-         *
-         * It is then updated after every streamed
-         * insertion.
          */
         let insertionPosition =
           documentEnd
 
         try {
-          const {
-            streamAIChat,
-          } = await import(
-            "@/components/ai/aiservice/aiService"
-          )
-
           /*
-           * Put the cursor at the actual end of
-           * the manuscript before streaming begins.
+           * Put the cursor at the actual end of the
+           * manuscript before streaming begins.
            */
           editor
             .chain()
@@ -285,29 +337,38 @@ ${sceneAIContext}`
             .setMark("aiText")
             .run()
 
+          /*
+           * Start the streaming generation.
+           *
+           * The AbortSignal connects the Stop AI
+           * button to the actual fetch/stream.
+           */
           await streamAIChat({
             messages,
             project,
             activeScene,
-
-            /*
-             * IMPORTANT:
-             *
-             * This is now the exact token value from
-             * the UI. No word/token conversion occurs.
-             */
             continueWritingTokens,
+
+            signal:
+              controller.signal,
 
             onToken: (
               token,
             ) => {
-              if (!token) {
+              /*
+               * Ignore any token that somehow arrives
+               * after the user pressed Stop.
+               */
+              if (
+                controller.signal.aborted ||
+                !token
+              ) {
                 return
               }
 
               /*
-               * Always insert at the explicit
-               * insertion position.
+               * Always insert at the explicit insertion
+               * position rather than the author's cursor.
                */
               const result =
                 editor
@@ -336,34 +397,10 @@ ${sceneAIContext}`
           })
 
           /*
-           * Stop applying the AI mark after
-           * generation has completed.
-           */
-          editor
-            .chain()
-            .focus()
-            .setTextSelection(
-              insertionPosition,
-            )
-            .unsetMark("aiText")
-            .run()
-
-          /*
-           * Explicitly save the final document.
-           */
-          updateSceneContent(
-            activeScene.id,
-            editor.getJSON(),
-          )
-        } catch (error) {
-          console.error(
-            "AI continue writing failed:",
-            error,
-          )
-
-          /*
-           * Make sure the AI mark does not remain
-           * active after an error.
+           * Normal completion.
+           *
+           * Remove the AI mark and save the completed
+           * document.
            */
           editor
             .chain()
@@ -376,7 +413,69 @@ ${sceneAIContext}`
             )
             .unsetMark("aiText")
             .run()
+
+          updateSceneContent(
+            activeScene.id,
+            editor.getJSON(),
+          )
+        } catch (error) {
+          /*
+           * Abort is an intentional user action.
+           * Do not report it as an AI failure.
+           */
+          const wasAborted =
+            controller.signal.aborted ||
+            (
+              error instanceof DOMException &&
+              error.name ===
+                "AbortError"
+            )
+
+          if (!wasAborted) {
+            console.error(
+              "AI continue writing failed:",
+              error,
+            )
+          }
+
+          /*
+           * Always clean up the AI mark.
+           */
+          editor
+            .chain()
+            .focus()
+            .setTextSelection(
+              Math.min(
+                insertionPosition,
+                editor.state.doc.content.size,
+              ),
+            )
+            .unsetMark("aiText")
+            .run()
+
+          /*
+           * IMPORTANT:
+           *
+           * If Stop was pressed, keep everything the
+           * AI managed to generate before cancellation.
+           */
+          updateSceneContent(
+            activeScene.id,
+            editor.getJSON(),
+          )
         } finally {
+          /*
+           * Only clear the controller if this is still
+           * the active generation.
+           */
+          if (
+            continueAbortController.current ===
+            controller
+          ) {
+            continueAbortController.current =
+              null
+          }
+
           setAIGenerating(
             false,
           )
@@ -408,21 +507,42 @@ ${sceneAIContext}`
 
   return (
     <div className="mnemeona-editor-shell">
+
       {/* -------------------------------------------------- */}
       {/* AI Generation Indicator */}
       {/* -------------------------------------------------- */}
 
       {aiGenerating && (
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-primary/5 px-4 text-xs text-primary">
-          <Loader2 className="size-3.5 animate-spin" />
+        <div className="flex h-11 shrink-0 items-center gap-3 border-b bg-primary/5 px-4 text-xs text-primary">
 
-          <span>
+          <Loader2 className="size-3.5 shrink-0 animate-spin" />
+
+          <span className="min-w-0 truncate">
             Mnemeona AI is continuing your scene...
           </span>
 
-          <span className="ml-auto text-muted-foreground">
+          <span className="ml-auto hidden text-muted-foreground sm:inline">
             Editing temporarily disabled
           </span>
+
+          {/* Stop AI */}
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 border-destructive/40 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={
+              stopAIContinue
+            }
+            title="Stop AI generation"
+            aria-label="Stop AI generation"
+          >
+            <Square className="size-3 fill-current" />
+
+            Stop AI
+          </Button>
+
         </div>
       )}
 
@@ -459,6 +579,7 @@ ${sceneAIContext}`
           />
         </div>
       </div>
+
     </div>
   )
 }

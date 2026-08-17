@@ -54,7 +54,9 @@ export interface AIMessage {
 }
 
 type ProjectScene =
-  MnemeonaProject["manuscript"]["acts"][number]["chapters"][number]["scenes"][number]
+  MnemeonaProject[
+    "manuscript"
+  ]["acts"][number]["chapters"][number]["scenes"][number]
 
 export interface AIChatOptions {
   messages: AIMessage[]
@@ -144,7 +146,9 @@ export function normalizeContinueWritingTokens(
 export function loadAIConfig(): AIConfig {
   try {
     const stored =
-      localStorage.getItem(STORAGE_KEY)
+      localStorage.getItem(
+        STORAGE_KEY,
+      )
 
     if (!stored) {
       return DEFAULT_CONFIG
@@ -190,7 +194,7 @@ export function buildAIContext(
       activeScene,
       project.characters,
       project.locations,
-      project.events
+      project.events,
     )
 
   const formattedContext =
@@ -210,6 +214,7 @@ CURRENT STORY CONTEXT:
 
 ${formattedContext}`
 }
+
 // --------------------------------------------------
 // Scene Text Extraction
 // --------------------------------------------------
@@ -333,10 +338,6 @@ export async function generateStorySummary(
       activeScene,
     )
 
-  /**
-   * There is nothing to summarize before the first
-   * scene.
-   */
   if (!previousScenes.trim()) {
     return (
       project.storySummary?.trim() ??
@@ -446,11 +447,6 @@ function cleanStorySummary(
     return ""
   }
 
-  /**
-   * Ollama/models sometimes return the requested
-   * summary wrapped in Markdown fences despite being
-   * explicitly told not to.
-   */
   result =
     result.replace(
       /^```(?:text|markdown)?\s*/i,
@@ -463,10 +459,7 @@ function cleanStorySummary(
       "",
     )
 
-  result =
-    result.trim()
-
-  return result
+  return result.trim()
 }
 
 // --------------------------------------------------
@@ -508,8 +501,7 @@ Title: ${activeScene.title}
 ${activeScene.pov ? `POV: ${activeScene.pov}` : ""}
 ${activeScene.location ? `Location: ${activeScene.location}` : ""}
 ${activeScene.time ? `Time: ${activeScene.time}` : ""}
-${activeScene.synopsis ? `Synopsis: ${activeScene.synopsis}` : ""}
-`
+${activeScene.synopsis ? `Synopsis: ${activeScene.synopsis}` : ""}`
 }
 
 // --------------------------------------------------
@@ -596,14 +588,6 @@ async function requestAICompletion({
       systemPrompt,
     })
 
-  /**
-   * Ollama accepts generation parameters inside
-   * the `options` object.
-   *
-   * Giving summaries an explicit output budget prevents
-   * the model from stopping before producing a useful
-   * summary.
-   */
   const options =
     maxTokens &&
     maxTokens > 0
@@ -636,7 +620,6 @@ async function requestAICompletion({
 
           body: JSON.stringify({
             model: config.model,
-
             messages:
               finalMessages,
 
@@ -654,11 +637,10 @@ async function requestAICompletion({
       )
   } catch (error) {
     if (
-      error instanceof DOMException &&
-      error.name ===
-        "AbortError"
+      isAbortError(error) ||
+      signal?.aborted
     ) {
-      throw error
+      throw createAbortError()
     }
 
     throw new Error(
@@ -670,39 +652,8 @@ async function requestAICompletion({
   }
 
   if (!response.ok) {
-    let message =
-      `AI server returned HTTP ${response.status}.`
-
-    try {
-      const body =
-        await response.text()
-
-      if (body.trim()) {
-        try {
-          const parsed =
-            JSON.parse(body)
-
-          if (
-            typeof parsed?.error ===
-            "string"
-          ) {
-            message =
-              parsed.error
-          } else {
-            message =
-              body
-          }
-        } catch {
-          message =
-            body
-        }
-      }
-    } catch {
-      // Keep default error.
-    }
-
-    throw new Error(
-      message,
+    throw await createAIResponseError(
+      response,
     )
   }
 
@@ -758,6 +709,14 @@ export async function streamAIChat({
     loadAIConfig()
 
   validateAIConfig(config)
+
+  /*
+   * If the caller already cancelled before the request
+   * starts, fail immediately.
+   */
+  if (signal?.aborted) {
+    throw createAbortError()
+  }
 
   const endpoint =
     config.endpoint.replace(
@@ -826,11 +785,10 @@ export async function streamAIChat({
       )
   } catch (error) {
     if (
-      error instanceof DOMException &&
-      error.name ===
-        "AbortError"
+      isAbortError(error) ||
+      signal?.aborted
     ) {
-      throw error
+      throw createAbortError()
     }
 
     throw new Error(
@@ -842,39 +800,8 @@ export async function streamAIChat({
   }
 
   if (!response.ok) {
-    let message =
-      `AI server returned HTTP ${response.status}.`
-
-    try {
-      const body =
-        await response.text()
-
-      if (body.trim()) {
-        try {
-          const parsed =
-            JSON.parse(body)
-
-          if (
-            typeof parsed?.error ===
-            "string"
-          ) {
-            message =
-              parsed.error
-          } else {
-            message =
-              body
-          }
-        } catch {
-          message =
-            body
-        }
-      }
-    } catch {
-      // Keep default error.
-    }
-
-    throw new Error(
-      message,
+    throw await createAIResponseError(
+      response,
     )
   }
 
@@ -892,10 +819,42 @@ export async function streamAIChat({
 
   let buffer = ""
   let fullResponse = ""
+  let finished = false
+
+  /*
+   * Make sure the stream reader is cancelled if the
+   * AbortController fires while reader.read() is waiting.
+   *
+   * This is the important part that makes Stop AI
+   * responsive during an active Ollama stream.
+   */
+  let abortHandler:
+    | (() => void)
+    | undefined
+
+  if (signal) {
+    abortHandler = () => {
+      void reader.cancel()
+    }
+
+    signal.addEventListener(
+      "abort",
+      abortHandler,
+      {
+        once: true,
+      },
+    )
+  }
 
   const processLine = (
     line: string,
   ): boolean => {
+    if (
+      signal?.aborted
+    ) {
+      throw createAbortError()
+    }
+
     const trimmed =
       line.trim()
 
@@ -909,7 +868,7 @@ export async function streamAIChat({
 
       if (data?.error) {
         throw new Error(
-          data.error,
+          String(data.error),
         )
       }
 
@@ -922,8 +881,22 @@ export async function streamAIChat({
         onToken?.(token)
       }
 
-      return data?.done === true
+      if (
+        data?.done === true
+      ) {
+        finished = true
+        return true
+      }
+
+      return false
     } catch (error) {
+      if (
+        isAbortError(error) ||
+        signal?.aborted
+      ) {
+        throw createAbortError()
+      }
+
       if (
         error instanceof Error &&
         error.message !==
@@ -932,19 +905,52 @@ export async function streamAIChat({
         throw error
       }
 
+      /*
+       * Incomplete JSON is expected when a chunk ends
+       * in the middle of a JSON object.
+       */
       return false
     }
   }
 
   try {
-    while (true) {
+    while (!finished) {
+      if (
+        signal?.aborted
+      ) {
+        throw createAbortError()
+      }
+
+      let readResult:
+        | ReadableStreamReadResult<Uint8Array>
+
+      try {
+        readResult =
+          await reader.read()
+      } catch (error) {
+        if (
+          isAbortError(error) ||
+          signal?.aborted
+        ) {
+          throw createAbortError()
+        }
+
+        throw error
+      }
+
       const {
         value,
         done,
-      } = await reader.read()
+      } = readResult
 
       if (done) {
         break
+      }
+
+      if (
+        signal?.aborted
+      ) {
+        throw createAbortError()
       }
 
       buffer +=
@@ -961,27 +967,127 @@ export async function streamAIChat({
       buffer =
         lines.pop() ?? ""
 
-      for (const line of lines) {
-        const finished =
+      for (
+        const line of lines
+      ) {
+        if (
           processLine(line)
-
-        if (finished) {
-          return fullResponse
+        ) {
+          break
         }
       }
     }
 
-    buffer +=
-      decoder.decode()
-
-    if (buffer.trim()) {
+    if (
+      !finished &&
+      buffer.trim()
+    ) {
       processLine(buffer)
     }
+
+    if (
+      signal?.aborted
+    ) {
+      throw createAbortError()
+    }
+
+    return fullResponse
+  } catch (error) {
+    if (
+      isAbortError(error) ||
+      signal?.aborted
+    ) {
+      throw createAbortError()
+    }
+
+    throw error
   } finally {
-    reader.releaseLock()
+    if (
+      signal &&
+      abortHandler
+    ) {
+      signal.removeEventListener(
+        "abort",
+        abortHandler,
+      )
+    }
+
+    /*
+     * Always release the reader lock.
+     *
+     * reader.cancel() may already have been called
+     * by the AbortController, which is safe.
+     */
+    try {
+      reader.releaseLock()
+    } catch {
+      // Reader was already released.
+    }
+  }
+}
+
+// --------------------------------------------------
+// Abort Helpers
+// --------------------------------------------------
+
+function isAbortError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof DOMException &&
+    error.name ===
+      "AbortError"
+  )
+}
+
+function createAbortError(): DOMException {
+  return new DOMException(
+    "AI generation was stopped.",
+    "AbortError",
+  )
+}
+
+// --------------------------------------------------
+// AI HTTP Error
+// --------------------------------------------------
+
+async function createAIResponseError(
+  response: Response,
+): Promise<Error> {
+  let message =
+    `AI server returned HTTP ${response.status}.`
+
+  try {
+    const body =
+      await response.text()
+
+    if (body.trim()) {
+      try {
+        const parsed =
+          JSON.parse(body)
+
+        if (
+          typeof parsed?.error ===
+          "string"
+        ) {
+          message =
+            parsed.error
+        } else {
+          message =
+            body
+        }
+      } catch {
+        message =
+          body
+      }
+    }
+  } catch {
+    // Keep default error.
   }
 
-  return fullResponse
+  return new Error(
+    message,
+  )
 }
 
 // --------------------------------------------------
@@ -1046,39 +1152,8 @@ export async function testAIConnection(): Promise<void> {
   }
 
   if (!response.ok) {
-    let message =
-      `AI server returned HTTP ${response.status}.`
-
-    try {
-      const body =
-        await response.text()
-
-      if (body.trim()) {
-        try {
-          const parsed =
-            JSON.parse(body)
-
-          if (
-            typeof parsed?.error ===
-            "string"
-          ) {
-            message =
-              parsed.error
-          } else {
-            message =
-              body
-          }
-        } catch {
-          message =
-            body
-        }
-      }
-    } catch {
-      // Keep default error.
-    }
-
-    throw new Error(
-      message,
+    throw await createAIResponseError(
+      response,
     )
   }
 
@@ -1102,12 +1177,15 @@ export async function testAIConnection(): Promise<void> {
     )
   }
 
-  const answer =
-    data?.message?.content?.trim()
+  const responseText =
+    typeof data?.message?.content ===
+    "string"
+      ? data.message.content.trim()
+      : ""
 
-  if (!answer) {
+  if (!responseText) {
     throw new Error(
-      `The model "${config.model}" connected but returned an empty response.`,
+      "The AI server returned an empty response.",
     )
   }
 }
