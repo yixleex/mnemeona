@@ -325,11 +325,12 @@ export function ProjectSwitcher() {
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuLabel className="flex items-center gap-2">
+          <div className="flex items-center gap-2 px-1.5 py-1 text-xs font-medium text-muted-foreground">
+
             <Library className="size-4" />
 
             Local Project Library
-          </DropdownMenuLabel>
+          </div>
 
           {storedProjects.length ===
           0 ? (
