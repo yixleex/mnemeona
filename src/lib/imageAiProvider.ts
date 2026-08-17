@@ -29,7 +29,9 @@ export interface GenerateImageOptions {
   provider?: string
   settings?: Record<string, unknown>
   signal?: AbortSignal
-  onProgress?: (progress: number) => void
+  onProgress?: (
+    progress: number,
+  ) => void
 }
 
 export interface GenerateImageResult {
@@ -41,27 +43,62 @@ export interface GenerateImageResult {
   provider?: string
 }
 
-const STORAGE_KEY = "mnemeona-image-ai-settings"
-
-export const DEFAULT_IMAGE_AI_CONFIG: ImageAiConfig = {
-  endpoint: "http://127.0.0.1:8000",
-  provider: "lcm",
-  settings: {},
+export interface ImageAiSettingsSchema {
+  type?: string
+  properties?: Record<
+    string,
+    {
+      type?: string
+      title?: string
+      description?: string
+      default?: unknown
+      minimum?: number
+      maximum?: number
+      step?: number
+      enum?: unknown[]
+    }
+  >
 }
 
+const STORAGE_KEY =
+  "mnemeona-image-ai-settings"
+
+export const DEFAULT_IMAGE_AI_CONFIG: ImageAiConfig =
+  {
+    endpoint:
+      "http://127.0.0.1:8000",
+
+    provider: "lcm",
+
+    settings: {},
+  }
+
+
 export function loadImageAiConfig(): ImageAiConfig {
-  if (typeof window === "undefined") {
-    return DEFAULT_IMAGE_AI_CONFIG
+  if (
+    typeof window === "undefined"
+  ) {
+    return {
+      ...DEFAULT_IMAGE_AI_CONFIG,
+      settings: {},
+    }
   }
 
   try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
+    const stored =
+      window.localStorage.getItem(
+        STORAGE_KEY,
+      )
 
     if (!stored) {
-      return DEFAULT_IMAGE_AI_CONFIG
+      return {
+        ...DEFAULT_IMAGE_AI_CONFIG,
+        settings: {},
+      }
     }
 
-    const parsed = JSON.parse(stored)
+    const parsed =
+      JSON.parse(stored)
 
     return {
       ...DEFAULT_IMAGE_AI_CONFIG,
@@ -72,14 +109,20 @@ export function loadImageAiConfig(): ImageAiConfig {
       },
     }
   } catch {
-    return DEFAULT_IMAGE_AI_CONFIG
+    return {
+      ...DEFAULT_IMAGE_AI_CONFIG,
+      settings: {},
+    }
   }
 }
+
 
 export function saveImageAiConfig(
   config: ImageAiConfig,
 ): void {
-  if (typeof window === "undefined") {
+  if (
+    typeof window === "undefined"
+  ) {
     return
   }
 
@@ -89,12 +132,17 @@ export function saveImageAiConfig(
   )
 }
 
+
 function buildURL(
   endpoint: string,
   path: string,
 ): string {
-  return `${endpoint.replace(/\/+$/, "")}${path}`
+  return `${endpoint.replace(
+    /\/+$/,
+    "",
+  )}${path}`
 }
+
 
 async function imageFetch(
   endpoint: string,
@@ -103,7 +151,10 @@ async function imageFetch(
 ): Promise<Response> {
   try {
     return await fetch(
-      buildURL(endpoint, path),
+      buildURL(
+        endpoint,
+        path,
+      ),
       init,
     )
   } catch (error) {
@@ -118,13 +169,16 @@ async function imageFetch(
   }
 }
 
-export async function getImageProviders(): Promise<ImageAiProvidersResponse> {
-  const config = loadImageAiConfig()
 
-  const response = await imageFetch(
-    config.endpoint,
-    "/providers",
-  )
+export async function getImageProviders(): Promise<ImageAiProvidersResponse> {
+  const config =
+    loadImageAiConfig()
+
+  const response =
+    await imageFetch(
+      config.endpoint,
+      "/providers",
+    )
 
   if (!response.ok) {
     throw new Error(
@@ -134,28 +188,72 @@ export async function getImageProviders(): Promise<ImageAiProvidersResponse> {
 
   return response.json()
 }
+
+
+export async function getProviderSettingsSchema(
+  providerId: string,
+): Promise<ImageAiSettingsSchema> {
+  const config =
+    loadImageAiConfig()
+
+  const response =
+    await imageFetch(
+      config.endpoint,
+      `/providers/${encodeURIComponent(
+        providerId,
+      )}/settings`,
+    )
+
+  if (!response.ok) {
+    throw new Error(
+      `Could not load settings for ${providerId}.`,
+    )
+  }
+
+  const data =
+    await response.json()
+
+  return data.schema ?? {}
+}
+
+
+export async function getProviderStatus(
+  providerId: string,
+): Promise<Record<string, unknown>> {
+  const config =
+    loadImageAiConfig()
+
+  const response =
+    await imageFetch(
+      config.endpoint,
+      `/providers/${encodeURIComponent(
+        providerId,
+      )}/status`,
+    )
+
+  if (!response.ok) {
+    throw new Error(
+      `Could not load status for ${providerId}.`,
+    )
+  }
+
+  const data =
+    await response.json()
+
+  return data.status ?? {}
+}
+
 
 export async function testImageConnection(): Promise<ImageAiProvidersResponse> {
-  const config = loadImageAiConfig()
-
-  const response = await imageFetch(
-    config.endpoint,
-    "/providers",
-  )
-
-  if (!response.ok) {
-    throw new Error(
-      `Image service returned HTTP ${response.status}.`,
-    )
-  }
-
-  return response.json()
+  return getImageProviders()
 }
+
 
 export async function generateImage(
   options: GenerateImageOptions,
 ): Promise<GenerateImageResult> {
-  const config = loadImageAiConfig()
+  const config =
+    loadImageAiConfig()
 
   const {
     prompt,
@@ -171,7 +269,10 @@ export async function generateImage(
 
   onProgress?.(5)
 
-  const body: Record<string, unknown> = {
+  const body: Record<
+    string,
+    unknown
+  > = {
     prompt,
     width,
     height,
@@ -184,18 +285,25 @@ export async function generateImage(
     body.seed = seed
   }
 
-  const response = await imageFetch(
-    config.endpoint,
-    "/generate",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+  const response =
+    await imageFetch(
+      config.endpoint,
+      "/generate",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+
+        body: JSON.stringify(
+          body,
+        ),
+
+        signal,
       },
-      body: JSON.stringify(body),
-      signal,
-    },
-  )
+    )
 
   onProgress?.(90)
 
@@ -204,19 +312,25 @@ export async function generateImage(
       `Image generation failed with HTTP ${response.status}.`
 
     try {
-      const errorData = await response.json()
+      const errorData =
+        await response.json()
 
-      if (typeof errorData?.detail === "string") {
-        message = errorData.detail
+      if (
+        typeof errorData?.detail ===
+        "string"
+      ) {
+        message =
+          errorData.detail
       }
     } catch {
-      // Keep the default HTTP error.
+      // Keep HTTP error.
     }
 
     throw new Error(message)
   }
 
-  const blob = await response.blob()
+  const blob =
+    await response.blob()
 
   if (!blob.size) {
     throw new Error(
@@ -225,21 +339,31 @@ export async function generateImage(
   }
 
   const mimeType =
-    response.headers.get("Content-Type") ||
+    response.headers.get(
+      "Content-Type",
+    ) ||
     blob.type ||
     "image/png"
 
   const seedHeader =
-    response.headers.get("X-Mnemeona-Seed")
+    response.headers.get(
+      "X-Mnemeona-Seed",
+    )
 
   const widthHeader =
-    response.headers.get("X-Mnemeona-Width")
+    response.headers.get(
+      "X-Mnemeona-Width",
+    )
 
   const heightHeader =
-    response.headers.get("X-Mnemeona-Height")
+    response.headers.get(
+      "X-Mnemeona-Height",
+    )
 
   const providerHeader =
-    response.headers.get("X-Mnemeona-Provider")
+    response.headers.get(
+      "X-Mnemeona-Provider",
+    )
 
   const parsedSeed =
     seedHeader !== null
@@ -261,19 +385,30 @@ export async function generateImage(
   return {
     blob,
     mimeType,
+
     width:
-      Number.isFinite(parsedWidth)
+      Number.isFinite(
+        parsedWidth,
+      )
         ? parsedWidth
         : undefined,
+
     height:
-      Number.isFinite(parsedHeight)
+      Number.isFinite(
+        parsedHeight,
+      )
         ? parsedHeight
         : undefined,
+
     seed:
-      Number.isFinite(parsedSeed)
+      Number.isFinite(
+        parsedSeed,
+      )
         ? parsedSeed
         : undefined,
+
     provider:
-      providerHeader || provider,
+      providerHeader ||
+      provider,
   }
 }

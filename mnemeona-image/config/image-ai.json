@@ -3,7 +3,7 @@
   "providers": {
     "lcm": {
       "enabled": true,
-      "model_path": "./mnemeona-image/models/LCM_Dreamshaper_v7",
+      "model_path": "./models/LCM_Dreamshaper_v7",
       "device": "auto",
       "dtype": "float16",
       "settings": {

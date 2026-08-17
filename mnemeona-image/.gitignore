@@ -30,9 +30,6 @@ build/
 # Local configuration
 # ============================================================
 
-# User-specific image AI configuration
-config/image-ai.json
-
 # Local environment overrides
 *.local.json
 *.local.yaml
