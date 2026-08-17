@@ -33,8 +33,11 @@ export default defineConfig({
       : undefined,
 
     watch: {
-      ignored: ["**/tauri/**"],
-    },
+        ignored: [
+            "**/tauri/**",
+            "**/mnemeona-image/**"
+        ],
+      },
   },
 
   envPrefix: ["VITE_", "TAURI_ENV_*"],
