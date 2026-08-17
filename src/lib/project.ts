@@ -1,6 +1,10 @@
 import type { MnemeonaProject } from "@/types/project"
 import type { Manuscript } from "@/types/manuscript"
 
+import {
+  importProjectIntoDatabase,
+} from "./projectDatabase"
+
 export function createId(): string {
   return crypto.randomUUID()
 }
@@ -39,7 +43,9 @@ function createEmptyChapter(
     synopsis: "",
 
     scenes: [
-      createEmptyScene("Scene 1"),
+      createEmptyScene(
+        "Scene 1",
+      ),
     ],
   }
 }
@@ -54,7 +60,9 @@ function createEmptyAct(
     synopsis: "",
 
     chapters: [
-      createEmptyChapter("Chapter 1"),
+      createEmptyChapter(
+        "Chapter 1",
+      ),
     ],
   }
 }
@@ -67,7 +75,9 @@ export function createManuscript(
     title,
 
     acts: [
-      createEmptyAct("Act I"),
+      createEmptyAct(
+        "Act I",
+      ),
     ],
   }
 }
@@ -75,7 +85,8 @@ export function createManuscript(
 export function createProject(
   title = "Untitled Novel",
 ): MnemeonaProject {
-  const now = new Date().toISOString()
+  const now =
+    new Date().toISOString()
 
   const manuscript =
     createManuscript(title)
@@ -96,107 +107,169 @@ export function createProject(
 
     characters: [],
 
-    // world
     locations: [],
     events: [],
 
     notes: [],
 
     storySummary: "",
-    storySummaryFingerprint: "",
+    storySummaryFingerprint:
+      "",
 
     settings: {
       activeSceneId:
-        firstScene?.id ?? null,
+        firstScene?.id ??
+        null,
     },
   }
 }
 
+/**
+ * Export one project as a portable JSON file.
+ *
+ * This remains intentionally separate from the IndexedDB
+ * database export.
+ */
 export function downloadProject(
   project: MnemeonaProject,
 ) {
-  const json = JSON.stringify(
-    project,
-    null,
-    2,
-  )
+  const json =
+    JSON.stringify(
+      project,
+      null,
+      2,
+    )
 
-  const blob = new Blob([json], {
-    type: "application/json",
-  })
+  const blob =
+    new Blob([json], {
+      type:
+        "application/json",
+    })
 
   const url =
-    URL.createObjectURL(blob)
+    URL.createObjectURL(
+      blob,
+    )
 
   const anchor =
-    document.createElement("a")
+    document.createElement(
+      "a",
+    )
 
   anchor.href = url
 
   anchor.download =
-    `${project.title || "mnemeona-project"}.mnemeona.json`
+    `${
+      project.title ||
+      "mnemeona-project"
+    }.mnemeona.json`
 
-  document.body.appendChild(anchor)
+  document.body.appendChild(
+    anchor,
+  )
 
   anchor.click()
 
   anchor.remove()
 
-  URL.revokeObjectURL(url)
+  URL.revokeObjectURL(
+    url,
+  )
 }
 
-export async function openProject(): Promise<MnemeonaProject | null> {
+/**
+ * Open one individual .mnemeona.json project.
+ *
+ * The imported project is also placed into IndexedDB and
+ * becomes the active local project.
+ */
+export async function openProject(): Promise<
+  MnemeonaProject | null
+> {
   const input =
-    document.createElement("input")
+    document.createElement(
+      "input",
+    )
 
   input.type = "file"
 
   input.accept =
     ".json,.mnemeona.json,application/json"
 
-  return new Promise((resolve) => {
-    input.onchange = async () => {
-      const file =
-        input.files?.[0]
+  return new Promise(
+    (resolve) => {
+      input.onchange =
+        async () => {
+          const file =
+            input.files?.[0]
 
-      if (!file) {
-        resolve(null)
-        return
-      }
+          if (!file) {
+            resolve(null)
+            return
+          }
 
-      try {
-        const text =
-          await file.text()
+          try {
+            const text =
+              await file.text()
 
-        const parsed =
-          JSON.parse(text) as Partial<MnemeonaProject>
+            const parsed =
+              JSON.parse(
+                text,
+              ) as Partial<MnemeonaProject>
 
-        /*
-         * Normalize older project files.
-         *
-         * Projects created before storySummary existed
-         * will not have this property, so default it to
-         * an empty string.
-         */
-        const project: MnemeonaProject = {
-          ...parsed,
-          storySummary:
-            parsed.storySummary ?? "",
-          storySummaryFingerprint:
-            parsed.storySummaryFingerprint ?? "",
-        } as MnemeonaProject
+            const project: MnemeonaProject =
+              {
+                ...parsed,
 
-        resolve(project)
-      } catch (error) {
-        console.error(
-          "Failed to open Mnemeona project:",
-          error,
-        )
+                storySummary:
+                  parsed.storySummary ??
+                  "",
 
-        resolve(null)
-      }
-    }
+                storySummaryFingerprint:
+                  parsed.storySummaryFingerprint ??
+                  "",
 
-    input.click()
-  })
+                characters:
+                  parsed.characters ??
+                  [],
+
+                locations:
+                  parsed.locations ??
+                  [],
+
+                events:
+                  parsed.events ??
+                  [],
+
+                notes:
+                  parsed.notes ??
+                  [],
+              } as MnemeonaProject
+
+            await importProjectIntoDatabase(
+              project,
+            )
+
+            resolve(project)
+          } catch (error) {
+            console.error(
+              "Failed to open Mnemeona project:",
+              error,
+            )
+
+            window.alert(
+              `Could not open project.\n\n${
+                error instanceof Error
+                  ? error.message
+                  : "Unknown error"
+              }`,
+            )
+
+            resolve(null)
+          }
+        }
+
+      input.click()
+    },
+  )
 }

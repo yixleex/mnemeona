@@ -1,4 +1,7 @@
-import type { Dispatch, SetStateAction } from "react"
+import type {
+  Dispatch,
+  SetStateAction,
+} from "react"
 
 import type { MnemeonaProject } from "@/types/project"
 
@@ -7,6 +10,10 @@ import {
   downloadProject,
   openProject,
 } from "@/lib/project"
+
+import {
+  saveProjectToDatabase,
+} from "@/lib/projectDatabase"
 
 type SetProject = Dispatch<
   SetStateAction<MnemeonaProject>
@@ -20,13 +27,20 @@ export function createNewProject(
   setProject: SetProject,
   title = "Untitled Novel",
 ) {
-  setProject(
-    createProject(title),
+  const project =
+    createProject(title)
+
+  setProject(project)
+
+  // Store the new project immediately.
+  void saveProjectToDatabase(
+    project,
+    true,
   )
 }
 
 // --------------------------------------------------
-// Load
+// Load individual JSON
 // --------------------------------------------------
 
 export async function loadProject(
@@ -36,18 +50,35 @@ export async function loadProject(
     await openProject()
 
   if (loadedProject) {
-    setProject(loadedProject)
+    setProject(
+      loadedProject,
+    )
+
+    // openProject already stores it in IndexedDB.
   }
 }
 
 // --------------------------------------------------
-// Save
+// Save individual JSON
 // --------------------------------------------------
 
 export function saveProject(
   project: MnemeonaProject,
 ) {
   downloadProject(project)
+}
+
+// --------------------------------------------------
+// Save to IndexedDB
+// --------------------------------------------------
+
+export async function saveProjectToDatabaseAction(
+  project: MnemeonaProject,
+) {
+  await saveProjectToDatabase(
+    project,
+    true,
+  )
 }
 
 // --------------------------------------------------
@@ -60,8 +91,9 @@ export function updateProject(
     project: MnemeonaProject,
   ) => MnemeonaProject,
 ) {
-  setProject((current) =>
-    updater(current),
+  setProject(
+    (current) =>
+      updater(current),
   )
 }
 
@@ -80,12 +112,15 @@ export function renameProject(
     return
   }
 
-  setProject((current) => ({
-    ...current,
+  setProject(
+    (current) => ({
+      ...current,
 
-    title: trimmedTitle,
+      title:
+        trimmedTitle,
 
-    updatedAt:
-      new Date().toISOString(),
-  }))
+      updatedAt:
+        new Date().toISOString(),
+    }),
+  )
 }

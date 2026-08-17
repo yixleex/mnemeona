@@ -1,18 +1,25 @@
-import { useState } from "react"
+import {
+  useEffect,
+  useState,
+} from "react"
 
 import {
   Check,
   ChevronDown,
+  Download,
   FilePlus,
   FolderOpen,
+  Library,
   Pencil,
   Save,
+  Upload,
 } from "lucide-react"
 
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -26,56 +33,30 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  Button,
+} from "@/components/ui/button"
 
-import { useProject } from "@/context/ProjectContext"
-import { NewProjectDialog } from "@/components/project/NewProjectDialog"
+import {
+  Input,
+} from "@/components/ui/input"
 
-const RECENT_PROJECTS_KEY =
-  "mnemeona-recent-projects"
+import {
+  useProject,
+} from "@/context/ProjectContext"
 
-interface RecentProject {
-  id: string
-  title: string
-  updatedAt: string
-}
+import {
+  NewProjectDialog,
+} from "@/components/project/NewProjectDialog"
 
-function getRecentProjects(): RecentProject[] {
-  try {
-    const stored = localStorage.getItem(
-      RECENT_PROJECTS_KEY,
-    )
-
-    if (!stored) {
-      return []
-    }
-
-    return JSON.parse(
-      stored,
-    ) as RecentProject[]
-  } catch {
-    return []
-  }
-}
-
-function saveRecentProject(
-  project: RecentProject,
-) {
-  const existing = getRecentProjects()
-
-  const updated = [
-    project,
-    ...existing.filter(
-      (item) => item.id !== project.id,
-    ),
-  ].slice(0, 5)
-
-  localStorage.setItem(
-    RECENT_PROJECTS_KEY,
-    JSON.stringify(updated),
-  )
-}
+import {
+  getCurrentProjectId,
+  getProjectFromDatabase,
+  importProjectDatabase,
+  listProjectsFromDatabase,
+  exportProjectDatabase,
+  type StoredProjectSummary,
+} from "@/lib/projectDatabase"
 
 export function ProjectSwitcher() {
   const {
@@ -83,61 +64,223 @@ export function ProjectSwitcher() {
     loadProject,
     saveProject,
     renameProject,
+    updateProject,
   } = useProject()
 
-  const [newProjectOpen, setNewProjectOpen] =
-    useState(false)
+  const [
+    newProjectOpen,
+    setNewProjectOpen,
+  ] = useState(false)
 
-  const [renameProjectOpen, setRenameProjectOpen] =
-    useState(false)
+  const [
+    renameProjectOpen,
+    setRenameProjectOpen,
+  ] = useState(false)
 
-  const [projectName, setProjectName] =
-    useState(project.title)
+  const [
+    projectName,
+    setProjectName,
+  ] = useState(
+    project.title,
+  )
 
-  const handleOpenProject = async () => {
-    await loadProject()
-  }
+  const [
+    storedProjects,
+    setStoredProjects,
+  ] = useState<
+    StoredProjectSummary[]
+  >([])
 
-  const handleSaveProject = () => {
-    saveProject()
+  const [
+    currentProjectId,
+    setCurrentProjectId,
+  ] = useState<
+    string | null
+  >(null)
 
-    saveRecentProject({
-      id: project.id,
-      title: project.title,
-      updatedAt: new Date().toISOString(),
-    })
-  }
+  const refreshProjectLibrary =
+    async () => {
+      try {
+        const [
+          projects,
+          activeId,
+        ] = await Promise.all([
+          listProjectsFromDatabase(),
+          getCurrentProjectId(),
+        ])
 
-  const handleOpenRename = () => {
-    setProjectName(project.title)
-    setRenameProjectOpen(true)
-  }
+        setStoredProjects(
+          projects,
+        )
 
-  const handleRenameProject = () => {
-    const trimmedName =
-      projectName.trim()
-
-    if (!trimmedName) {
-      return
+        setCurrentProjectId(
+          activeId,
+        )
+      } catch (error) {
+        console.error(
+          "Failed to load project library:",
+          error,
+        )
+      }
     }
 
-    renameProject(trimmedName)
-    setRenameProjectOpen(false)
-  }
+  useEffect(() => {
+    void refreshProjectLibrary()
 
-  const recentProjects =
-    getRecentProjects()
+    const handleDatabaseChange =
+      () => {
+        void refreshProjectLibrary()
+      }
+
+    window.addEventListener(
+      "mnemeona:project-database-changed",
+      handleDatabaseChange,
+    )
+
+    return () => {
+      window.removeEventListener(
+        "mnemeona:project-database-changed",
+        handleDatabaseChange,
+      )
+    }
+  }, [])
+
+  const handleOpenProject =
+    async () => {
+      await loadProject()
+      await refreshProjectLibrary()
+    }
+
+  const handleSaveProject =
+    () => {
+      saveProject()
+    }
+
+  const handleOpenStoredProject =
+    async (
+      projectId: string,
+    ) => {
+      try {
+        const storedProject =
+          await getProjectFromDatabase(
+            projectId,
+          )
+
+        if (!storedProject) {
+          return
+        }
+
+        updateProject(
+          () =>
+            storedProject,
+        )
+
+        await refreshProjectLibrary()
+      } catch (error) {
+        console.error(
+          "Failed to load stored project:",
+          error,
+        )
+
+        window.alert(
+          `Could not load project.\n\n${
+            error instanceof Error
+              ? error.message
+              : "Unknown error"
+          }`,
+        )
+      }
+    }
+
+  const handleExportDatabase =
+    async () => {
+      try {
+        await exportProjectDatabase()
+      } catch (error) {
+        console.error(
+          "Failed to export project database:",
+          error,
+        )
+
+        window.alert(
+          `Could not export project database.\n\n${
+            error instanceof Error
+              ? error.message
+              : "Unknown error"
+          }`,
+        )
+      }
+    }
+
+  const handleImportDatabase =
+    async () => {
+      const confirmed =
+        window.confirm(
+          "Importing a project database will replace the current local Mnemeona project database.\n\nContinue?",
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      const importedProject =
+        await importProjectDatabase()
+
+      if (
+        importedProject
+      ) {
+        updateProject(
+          () =>
+            importedProject,
+        )
+
+        await refreshProjectLibrary()
+      }
+    }
+
+  const handleOpenRename =
+    () => {
+      setProjectName(
+        project.title,
+      )
+
+      setRenameProjectOpen(
+        true,
+      )
+    }
+
+  const handleRenameProject =
+    () => {
+      const trimmedName =
+        projectName.trim()
+
+      if (!trimmedName) {
+        return
+      }
+
+      renameProject(
+        trimmedName,
+      )
+
+      setRenameProjectOpen(
+        false,
+      )
+    }
 
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+        <DropdownMenuTrigger
+          asChild
+        >
           <Button
             variant="ghost"
             className="max-w-64 gap-2 px-2"
           >
             <span className="truncate">
-              {project.title}
+              {
+                project.title
+              }
             </span>
 
             <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
@@ -146,82 +289,132 @@ export function ProjectSwitcher() {
 
         <DropdownMenuContent
           align="start"
-          className="w-64"
+          className="w-72"
         >
           <DropdownMenuItem
             onClick={() =>
-              setNewProjectOpen(true)
+              setNewProjectOpen(
+                true,
+              )
             }
           >
             <FilePlus className="mr-2 size-4" />
+
             New Project
           </DropdownMenuItem>
 
           <DropdownMenuItem
-            onClick={handleOpenProject}
+            onClick={
+              handleOpenProject
+            }
           >
             <FolderOpen className="mr-2 size-4" />
-            Open Project...
+
+            Open Project File...
           </DropdownMenuItem>
 
           <DropdownMenuItem
-            onClick={handleSaveProject}
+            onClick={
+              handleSaveProject
+            }
           >
             <Save className="mr-2 size-4" />
-            Save Project
+
+            Export Project JSON
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuLabel className="flex items-center gap-2">
+            <Library className="size-4" />
+
+            Local Project Library
+          </DropdownMenuLabel>
+
+          {storedProjects.length ===
+          0 ? (
+            <div className="px-2 py-2 text-xs text-muted-foreground">
+              No stored projects yet.
+            </div>
+          ) : (
+            storedProjects.map(
+              (
+                stored,
+              ) => (
+                <DropdownMenuItem
+                  key={
+                    stored.id
+                  }
+                  onClick={() =>
+                    void handleOpenStoredProject(
+                      stored.id,
+                    )
+                  }
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {
+                      stored.title
+                    }
+                  </span>
+
+                  {stored.id ===
+                    currentProjectId && (
+                    <Check className="ml-2 size-4 shrink-0" />
+                  )}
+                </DropdownMenuItem>
+              ),
+            )
+          )}
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem
+            onClick={
+              handleExportDatabase
+            }
+          >
+            <Download className="mr-2 size-4" />
+
+            Export Project Database
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={
+              handleImportDatabase
+            }
+          >
+            <Upload className="mr-2 size-4" />
+
+            Import Project Database
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
 
           <DropdownMenuItem
-            onClick={handleOpenRename}
+            onClick={
+              handleOpenRename
+            }
           >
             <Pencil className="mr-2 size-4" />
+
             Rename Project
           </DropdownMenuItem>
-
-          {recentProjects.length > 0 && (
-            <>
-              <DropdownMenuSeparator />
-
-              <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                Recent Projects
-              </div>
-
-              {recentProjects.map(
-                (recent) => (
-                  <DropdownMenuItem
-                    key={recent.id}
-                    disabled={
-                      recent.id ===
-                      project.id
-                    }
-                  >
-                    <span className="truncate">
-                      {recent.title}
-                    </span>
-
-                    {recent.id ===
-                      project.id && (
-                      <Check className="ml-auto size-4" />
-                    )}
-                  </DropdownMenuItem>
-                ),
-              )}
-            </>
-          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
       <NewProjectDialog
-        open={newProjectOpen}
+        open={
+          newProjectOpen
+        }
         onOpenChange={
           setNewProjectOpen
         }
       />
 
       <Dialog
-        open={renameProjectOpen}
+        open={
+          renameProjectOpen
+        }
         onOpenChange={
           setRenameProjectOpen
         }
@@ -240,15 +433,23 @@ export function ProjectSwitcher() {
 
           <Input
             autoFocus
-            value={projectName}
-            onChange={(event) =>
+            value={
+              projectName
+            }
+            onChange={(
+              event,
+            ) =>
               setProjectName(
-                event.target.value,
+                event.target
+                  .value,
               )
             }
-            onKeyDown={(event) => {
+            onKeyDown={(
+              event,
+            ) => {
               if (
-                event.key === "Enter"
+                event.key ===
+                "Enter"
               ) {
                 handleRenameProject()
               }

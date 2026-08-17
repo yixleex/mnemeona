@@ -31,6 +31,11 @@ import type { WorldEvent } from "@/types/world/event"
 
 import { createProject } from "@/lib/project"
 
+import {
+  getCurrentProject,
+  saveProjectToDatabase,
+} from "@/lib/projectDatabase"
+
 import { generateStorySummary } from "@/components/ai/aiservice/aiService"
 
 const ProjectContext =
@@ -148,6 +153,15 @@ export function ProjectProvider({
   const [summaryGenerating, setSummaryGenerating] =
     useState(false)
 
+  const [
+    databaseHydrated,
+    setDatabaseHydrated,
+  ] = useState(false)
+
+  const databaseSaveTimer =
+    useRef<ReturnType<
+      typeof setTimeout
+    > | null>(null)
   /**
    * Prevents the initial project mount from invoking
    * the AI summary service.
@@ -201,7 +215,134 @@ export function ProjectProvider({
       project,
       activeSceneId,
     )
+  // --------------------------------------------------
+  // IndexedDB project persistence
+  // --------------------------------------------------
 
+  useEffect(() => {
+    let cancelled = false
+
+    const restoreProject =
+      async () => {
+        try {
+          const storedProject =
+            await getCurrentProject()
+
+          if (
+            cancelled
+          ) {
+            return
+          }
+
+          if (
+            storedProject
+          ) {
+            setProject(
+              normalizeProject(
+                storedProject,
+              ),
+            )
+          } else {
+            /*
+             * First launch:
+             * put the automatically-created project into
+             * IndexedDB so it becomes the first local project.
+             */
+            const initialProject =
+              normalizeProject(
+                createProject(),
+              )
+
+            setProject(
+              initialProject,
+            )
+
+            await saveProjectToDatabase(
+              initialProject,
+              true,
+            )
+          }
+        } catch (error) {
+          /*
+           * IndexedDB should never prevent Mnemeona from
+           * starting. Fall back to the in-memory project.
+           */
+          console.error(
+            "Failed to restore project from IndexedDB:",
+            error,
+          )
+        } finally {
+          if (
+            !cancelled
+          ) {
+            setDatabaseHydrated(
+              true,
+            )
+          }
+        }
+      }
+
+    void restoreProject()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (
+      !databaseHydrated
+    ) {
+      return
+    }
+
+    /*
+     * Debounce IndexedDB writes.
+     *
+     * This is important because the editor can update the
+     * project state many times while the user is typing.
+     */
+    if (
+      databaseSaveTimer.current
+    ) {
+      clearTimeout(
+        databaseSaveTimer.current,
+      )
+    }
+
+    databaseSaveTimer.current =
+      setTimeout(
+        () => {
+          void saveProjectToDatabase(
+            normalizeProject(
+              project,
+            ),
+            true,
+          ).catch(
+            (error) => {
+              console.error(
+                "Failed to autosave project to IndexedDB:",
+                error,
+              )
+            },
+          )
+        },
+        500,
+      )
+
+    return () => {
+      if (
+        databaseSaveTimer.current
+      ) {
+        clearTimeout(
+          databaseSaveTimer.current,
+        )
+      }
+    }
+  }, [
+    project,
+    databaseHydrated,
+  ])
   // --------------------------------------------------
   // Story summary generation
   // --------------------------------------------------
