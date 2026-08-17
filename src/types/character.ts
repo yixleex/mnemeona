@@ -27,6 +27,8 @@ export interface Character {
 
   contextEnabled: boolean
 
+  imageIds?: string[]
+
   createdAt: string
   updatedAt: string
 }

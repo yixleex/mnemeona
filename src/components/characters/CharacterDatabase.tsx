@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import {
+    ImagePlus,
   Plus,
   Search,
   Users,
@@ -9,6 +10,10 @@ import {
   Trash2,
   X,
 } from "lucide-react"
+
+import {
+  ImageGenerationDialog,
+} from "@/components/ai/aiimage/ImageGenerationDialog"
 
 import { Button } from "@/components/ui/button"
 import type { Character } from "@/types/character"
@@ -36,7 +41,12 @@ export function CharacterDatabase({
       characters[0]?.id ?? null,
     )
 
-  const [search, setSearch] = useState("")
+    const [search, setSearch] = useState("")
+
+    const [
+      imageDialogOpen,
+      setImageDialogOpen,
+    ] = useState(false)
 
   /*
    * Keep the selected character valid when the
@@ -119,6 +129,41 @@ export function CharacterDatabase({
 
     setSelectedId(
       nextCharacter?.id ?? null,
+    )
+  }
+  function handleOpenImageGenerator() {
+    if (!selectedCharacter) {
+      return
+    }
+
+    setImageDialogOpen(true)
+  }
+
+  function handleImageSaved(
+    imageId: string,
+  ) {
+    if (!selectedCharacter) {
+      return
+    }
+
+    const existingIds =
+      selectedCharacter.imageIds ??
+      []
+
+    if (
+      existingIds.includes(imageId)
+    ) {
+      return
+    }
+
+    updateCharacter(
+      selectedCharacter.id,
+      {
+        imageIds: [
+          ...existingIds,
+          imageId,
+        ],
+      },
     )
   }
 
@@ -279,28 +324,31 @@ export function CharacterDatabase({
         {/* Character editor */}
         <main className="min-w-0 flex-1 overflow-y-auto">
           {selectedCharacter ? (
-            <CharacterEditor
-              character={
-                selectedCharacter
-              }
-              onUpdate={(updates) =>
-                updateCharacter(
-                  selectedCharacter.id,
-                  updates,
-                )
-              }
-              onDelete={
-                handleDeleteCharacter
-              }
-              onContextToggle={(
-                enabled,
-              ) =>
-                updateCharacterContext(
-                  selectedCharacter.id,
+              <CharacterEditor
+                character={
+                  selectedCharacter
+                }
+                onUpdate={(updates) =>
+                  updateCharacter(
+                    selectedCharacter.id,
+                    updates,
+                  )
+                }
+                onDelete={
+                  handleDeleteCharacter
+                }
+                onContextToggle={(
                   enabled,
-                )
-              }
-            />
+                ) =>
+                  updateCharacterContext(
+                    selectedCharacter.id,
+                    enabled,
+                  )
+                }
+                onGenerateImage={
+                  handleOpenImageGenerator
+                }
+              />
           ) : (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
@@ -330,7 +378,26 @@ export function CharacterDatabase({
             </div>
           )}
         </main>
-      </div>
+          </div>
+          {selectedCharacter && (
+            <ImageGenerationDialog
+              open={
+                imageDialogOpen
+              }
+              onOpenChange={
+                setImageDialogOpen
+              }
+              character={
+                selectedCharacter
+              }
+              projectId={
+                project.id
+              }
+              onImageSaved={
+                handleImageSaved
+              }
+            />
+          )}
     </div>
   )
 }
@@ -347,13 +414,16 @@ interface CharacterEditorProps {
   onContextToggle: (
     enabled: boolean,
   ) => void
+
+  onGenerateImage: () => void
 }
 
 function CharacterEditor({
   character,
   onUpdate,
   onDelete,
-  onContextToggle,
+    onContextToggle,
+    onGenerateImage,
 }: CharacterEditorProps) {
   function addAlias(value: string) {
     const alias = value.trim()
@@ -438,7 +508,18 @@ function CharacterEditor({
             }
             className="mt-1 w-full bg-transparent text-sm text-muted-foreground outline-none"
             placeholder="Role — protagonist, antagonist, mentor..."
-          />
+            />
+
+            <Button
+            variant="outline"
+            onClick={
+                onGenerateImage
+            }
+            >
+            <ImagePlus className="mr-2 size-4" />
+
+                Generate image
+            </Button>
         </div>
       </div>
 
