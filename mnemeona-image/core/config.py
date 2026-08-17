@@ -35,6 +35,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
 
+        "sdxl_vega": {
+          "enabled": True,
+          "model_path": "./models/Segmind-Vega",
+          "device": "auto",
+          "dtype": "float16",
+          "settings": {
+            "guidance_scale": 9.0,
+            "negative_prompt": "worst quality, low quality, blurry, distorted, deformed, bad anatomy",
+            "attention_slicing": True,
+            "vae_slicing": True,
+            "vae_tiling": True
+          }
+        },
+
         "sdxl_lightning": {
             "enabled": True,
 
