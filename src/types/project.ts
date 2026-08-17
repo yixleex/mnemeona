@@ -2,6 +2,7 @@ import type { Manuscript } from "./manuscript"
 import type { Character } from "./character"
 import type { Location } from "./world/location"
 import type { WorldEvent } from "./world/event"
+import type { StoryNote } from "./notes"
 
 export interface MnemeonaProject {
   id: string
@@ -20,7 +21,15 @@ export interface MnemeonaProject {
   locations: Location[]
   events: WorldEvent[]
 
-  notes: unknown[]
+  /**
+   * Persistent author-controlled notes.
+   *
+   * These are different from storySummary:
+   *
+   * - notes = author intent, canon, planning and persistent guidance
+   * - storySummary = AI-generated summary of what has actually happened
+   */
+  notes: StoryNote[]
 
   /**
    * Persistent AI-generated summary of the story so far.
