@@ -1,6 +1,6 @@
 import {
   useEffect,
-  useMemo,
+  useRef,
   useState,
 } from "react"
 
@@ -108,11 +108,83 @@ export function CharacterImageDialog({
   ] = useState("")
 
   /*
-   * Load every generated character image
-   * belonging to this character.
+   * Keep track of the currently allocated
+   * object URLs independently from React state.
+   *
+   * This prevents cleanup from accidentally
+   * revoking URLs for images that are still
+   * displayed after another image is deleted.
+   */
+  const previewsRef = useRef<
+    CharacterImagePreview[]
+  >([])
+
+  function revokePreviews(
+    previews: CharacterImagePreview[],
+  ) {
+    previews.forEach(
+      (preview) => {
+        URL.revokeObjectURL(
+          preview.url,
+        )
+      },
+    )
+  }
+
+  function replacePreviews(
+    next: CharacterImagePreview[],
+  ) {
+    revokePreviews(
+      previewsRef.current,
+    )
+
+    previewsRef.current =
+      next
+
+    setImages(
+      next,
+    )
+  }
+
+  /*
+   * Clean up all object URLs when the
+   * component unmounts.
+   */
+  useEffect(() => {
+    return () => {
+      revokePreviews(
+        previewsRef.current,
+      )
+
+      previewsRef.current = []
+    }
+  }, [])
+
+  /*
+   * Load all generated character images
+   * whenever the dialog opens or the
+   * character/project changes.
    */
   useEffect(() => {
     if (!open) {
+      /*
+       * Release previews while the dialog
+       * is closed.
+       */
+      revokePreviews(
+        previewsRef.current,
+      )
+
+      previewsRef.current = []
+
+      setImages([])
+
+      setSelectedId(null)
+
+      setError("")
+
+      setLoading(false)
+
       return
     }
 
@@ -151,42 +223,39 @@ export function CharacterImageDialog({
                 ).getTime(),
             )
 
-        const previews =
+        const nextPreviews =
           characterImages.map(
             (image) => ({
               image,
-              url: URL.createObjectURL(
-                image.blob,
-              ),
+              url:
+                URL.createObjectURL(
+                  image.blob,
+                ),
             }),
           )
 
         if (cancelled) {
-          previews.forEach(
-            (preview) => {
-              URL.revokeObjectURL(
-                preview.url,
-              )
-            },
+          revokePreviews(
+            nextPreviews,
           )
 
           return
         }
 
-        setImages(
-          previews,
+        replacePreviews(
+          nextPreviews,
         )
 
         /*
-         * Prefer the explicitly selected
-         * primary image.
+         * Prefer the character's explicitly
+         * selected primary image.
          *
          * Otherwise select the newest
          * available image.
          */
         const primaryExists =
-          character.primaryImageId &&
-          previews.some(
+          !!character.primaryImageId &&
+          nextPreviews.some(
             (preview) =>
               preview.image.id ===
               character.primaryImageId,
@@ -198,7 +267,8 @@ export function CharacterImageDialog({
           )
         } else {
           setSelectedId(
-            previews[0]?.image.id ??
+            nextPreviews[0]
+              ?.image.id ??
               null,
           )
         }
@@ -220,7 +290,7 @@ export function CharacterImageDialog({
       }
     }
 
-    loadImages()
+    void loadImages()
 
     return () => {
       cancelled = true
@@ -232,47 +302,28 @@ export function CharacterImageDialog({
     character.primaryImageId,
   ])
 
-  /*
-   * Revoke object URLs when the image list
-   * is replaced or the dialog unmounts.
-   */
-  useEffect(() => {
-    return () => {
-      images.forEach(
-        (preview) => {
-          URL.revokeObjectURL(
-            preview.url,
-          )
-        },
-      )
-    }
-  }, [images])
-
   const selectedImage =
-    useMemo(
-      () =>
-        images.find(
-          (preview) =>
-            preview.image.id ===
-            selectedId,
-        ) ?? null,
-      [
-        images,
+    images.find(
+      (preview) =>
+        preview.image.id ===
         selectedId,
-      ],
-    )
+    ) ?? null
 
   async function handleDelete(
     imageId: string,
   ) {
-    const image =
+    const preview =
       images.find(
-        (preview) =>
-          preview.image.id ===
+        (item) =>
+          item.image.id ===
           imageId,
       )
 
-    if (!image) {
+    if (!preview) {
+      return
+    }
+
+    if (deletingId) {
       return
     }
 
@@ -283,7 +334,7 @@ export function CharacterImageDialog({
     const confirmed =
       window.confirm(
         isPrimary
-          ? "Delete this image? It is currently used as this character's portrait."
+          ? "Delete this image? It is currently being used as this character's portrait."
           : "Delete this image permanently?",
       )
 
@@ -294,64 +345,72 @@ export function CharacterImageDialog({
     setDeletingId(
       imageId,
     )
+
     setError("")
 
     try {
       /*
-       * Determine what should become the
-       * primary image if the current primary
-       * is deleted.
+       * Work out what should become the
+       * primary image after deletion.
        *
-       * Because images are sorted newest-first,
-       * the first remaining image is a sensible
-       * fallback.
+       * Images are sorted newest-first,
+       * so the newest remaining image is
+       * used as the fallback.
        */
       const remaining =
-        images
-          .filter(
-            (preview) =>
-              preview.image.id !==
-              imageId,
-          )
+        images.filter(
+          (item) =>
+            item.image.id !==
+            imageId,
+        )
 
-      const nextPrimaryImageId =
-        isPrimary
-          ? (
-              remaining[0]
-                ?.image.id ??
-              null
-            )
-          : (
-              character.primaryImageId ??
-              remaining[0]
-                ?.image.id ??
-              null
-            )
+      let nextPrimaryImageId:
+        string | null
+
+      if (isPrimary) {
+        nextPrimaryImageId =
+          remaining[0]
+            ?.image.id ??
+          null
+      } else {
+        nextPrimaryImageId =
+          character.primaryImageId ??
+          null
+      }
 
       /*
-       * Remove the actual image from
-       * IndexedDB.
+       * Delete the actual Blob from IndexedDB.
        */
       await deleteImage(
         imageId,
       )
 
       /*
-       * Release its object URL immediately.
+       * Release only the deleted image's
+       * object URL.
        */
       URL.revokeObjectURL(
-        image.url,
+        preview.url,
       )
 
       /*
-       * Remove it from the local dialog.
+       * Keep the ref synchronized without
+       * revoking the URLs of the remaining
+       * images.
        */
+      previewsRef.current =
+        remaining
+
       setImages(
         remaining,
       )
 
       /*
-       * Update the selected image.
+       * If the deleted image was selected,
+       * select the new primary image.
+       *
+       * Otherwise preserve the current
+       * selection.
        */
       if (
         selectedId ===
@@ -363,9 +422,10 @@ export function CharacterImageDialog({
       }
 
       /*
-       * Tell the parent to update the
-       * character's imageIds and primary
-       * image reference.
+       * Tell CharacterDatabase to update:
+       *
+       * - imageIds
+       * - primaryImageId
        */
       await onDelete?.(
         imageId,
@@ -469,7 +529,11 @@ export function CharacterImageDialog({
               />
             </div>
 
-            <div className="min-w-0">
+            <div
+              className="
+                min-w-0
+              "
+            >
               <DialogTitle
                 className="
                   text-base
@@ -509,6 +573,7 @@ export function CharacterImageDialog({
               onClick={() =>
                 onOpenChange(false)
               }
+              aria-label="Close character images"
             >
               <X className="size-4" />
             </Button>
@@ -755,8 +820,7 @@ export function CharacterImageDialog({
                   {images.map(
                     (preview) => {
                       const selected =
-                        preview.image
-                          .id ===
+                        preview.image.id ===
                         selectedId
 
                       const primary =
@@ -806,6 +870,7 @@ export function CharacterImageDialog({
                               text-left
                               disabled:cursor-wait
                             "
+                            aria-label={`Select ${preview.image.name}`}
                           >
                             <div
                               className="
@@ -841,23 +906,87 @@ export function CharacterImageDialog({
                                 absolute
                                 right-2
                                 top-2
+                                z-10
                                 flex
-                                size-7
+                                size-8
                                 items-center
                                 justify-center
                                 rounded-full
+                                border-2
+                                border-background
                                 bg-primary
                                 text-primary-foreground
-                                shadow-lg
+                                shadow-xl
                               "
+                              title="Selected"
                             >
                               <Check
                                 className="
                                   size-4
+                                  stroke-[3]
                                 "
                               />
                             </div>
-                          )}
+                            )}
+
+                          {/* Delete button */}
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="icon"
+                            disabled={deleting}
+                            aria-label={`Delete ${preview.image.name}`}
+                            title="Delete image"
+                            onClick={(event) => {
+                              event.stopPropagation()
+
+                              void handleDelete(
+                                preview.image.id,
+                              )
+                            }}
+                            className="
+                              absolute
+                              bottom-2
+                              right-2
+                              z-10
+                              size-9
+                              rounded-lg
+                              border-2
+                              border-background
+                              bg-destructive
+                              text-destructive-foreground
+                              opacity-0
+                              shadow-xl
+                              translate-y-1
+                              transition-all
+                              duration-150
+                              hover:bg-destructive/90
+                              hover:scale-105
+                              group-hover:translate-y-0
+                              group-hover:opacity-100
+                              focus-visible:translate-y-0
+                              focus-visible:opacity-100
+                              focus-visible:ring-2
+                              focus-visible:ring-destructive
+                              focus-visible:ring-offset-2
+                            "
+                          >
+                            {deleting ? (
+                              <Loader2
+                                className="
+                                  size-4
+                                  animate-spin
+                                "
+                              />
+                            ) : (
+                              <Trash2
+                                className="
+                                  size-4
+                                  stroke-[2.5]
+                                "
+                              />
+                            )}
+                          </Button>
 
                           {/* Current portrait */}
                           {primary && (
@@ -880,51 +1009,6 @@ export function CharacterImageDialog({
                               Current
                             </div>
                           )}
-
-                          {/* Delete */}
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            size="icon"
-                            disabled={
-                              deleting
-                            }
-                            aria-label={`Delete ${preview.image.name}`}
-                            title="Delete image"
-                            onClick={() =>
-                              void handleDelete(
-                                preview
-                                  .image
-                                  .id,
-                              )
-                            }
-                            className="
-                              absolute
-                              right-2
-                              bottom-2
-                              size-8
-                              opacity-0
-                              shadow-lg
-                              transition-opacity
-                              group-hover:opacity-100
-                              focus-visible:opacity-100
-                            "
-                          >
-                            {deleting ? (
-                              <Loader2
-                                className="
-                                  size-4
-                                  animate-spin
-                                "
-                              />
-                            ) : (
-                              <Trash2
-                                className="
-                                  size-4
-                                "
-                              />
-                            )}
-                          </Button>
                         </div>
                       )
                     },
@@ -968,7 +1052,11 @@ export function CharacterImageDialog({
                       />
                     </div>
 
-                    <div className="mt-4">
+                    <div
+                      className="
+                        mt-4
+                      "
+                    >
                       <div
                         className="
                           flex
@@ -977,7 +1065,11 @@ export function CharacterImageDialog({
                           gap-3
                         "
                       >
-                        <div className="min-w-0">
+                        <div
+                          className="
+                            min-w-0
+                          "
+                        >
                           <p
                             className="
                               truncate
@@ -1013,6 +1105,7 @@ export function CharacterImageDialog({
                           </p>
                         </div>
 
+                        {/* Delete selected image */}
                         <Button
                           type="button"
                           variant="destructive"

@@ -243,7 +243,10 @@ export function CharacterDatabase({
     loadCharacterImages()
 
     return () => {
-      cancelled = true
+        cancelled = true
+        imageUrls.forEach((url) => {
+            URL.revokeObjectURL(url)
+          })
     }
   }, [
     project.id,
@@ -423,34 +426,74 @@ export function CharacterDatabase({
       return
     }
 
-    const existingIds =
+    const remainingIds = (
       selectedCharacter.imageIds ?? []
-
-    const remainingIds =
-      existingIds.filter(
-        (id) =>
-          id !== imageId,
-      )
+    ).filter(
+      (id) => id !== imageId,
+    )
 
     updateCharacter(
       selectedCharacter.id,
       {
-        imageIds:
-          remainingIds,
-
+        imageIds: remainingIds,
         primaryImageId:
-          nextPrimaryImageId ??
-          undefined,
+          nextPrimaryImageId || undefined,
       },
     )
 
     /*
-     * If the deleted image was the portrait,
-     * the next image becomes the portrait.
+     * Force the character image state to refresh
+     * immediately after deletion.
      *
-     * If no images remain, primaryImageId is
-     * cleared.
+     * CharacterImageDialog has already removed
+     * the actual Blob from IndexedDB.
      */
+    setCharacterImages(
+      (current) => {
+        const next = new Map(current)
+
+        const currentImage =
+          next.get(
+            selectedCharacter.id,
+          )
+
+        if (
+          currentImage?.id ===
+          imageId
+        ) {
+          next.delete(
+            selectedCharacter.id,
+          )
+        }
+
+        return next
+      },
+    )
+
+    setImageUrls(
+      (current) => {
+        const next = new Map(
+          current,
+        )
+
+        const currentUrl =
+          next.get(
+            selectedCharacter.id,
+          )
+
+        if (currentUrl) {
+          URL.revokeObjectURL(
+            currentUrl,
+          )
+        }
+
+        next.delete(
+          selectedCharacter.id,
+        )
+
+        return next
+      },
+    )
   }
 
     const selectedImageUrl =
