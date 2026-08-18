@@ -111,6 +111,34 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "use_cpu_offload": True,
             },
         },
+
+        "animagine_xl": {
+            "enabled": True,
+
+            "model_path": (
+                "./models/Animagine-XL-3.1"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "guidance_scale": 7.0,
+                "negative_prompt": (
+                    "lowres, bad anatomy, bad hands, "
+                    "text, error, missing fingers, "
+                    "extra digit, fewer digits, "
+                    "cropped, worst quality, "
+                    "low quality, normal quality, "
+                    "jpeg artifacts, signature, "
+                    "watermark, username, blurry"
+                ),
+                "attention_slicing": True,
+                "vae_slicing": True,
+                "vae_tiling": True,
+                "use_cpu_offload": True,
+            },
+        },
     },
 
     "gpu_coordination": {
@@ -233,6 +261,19 @@ def load_config() -> dict[str, Any]:
             "ssd_1b",
             {},
         )["model_path"] = ssd_1b_model
+
+    animagine_xl_model = os.getenv(
+        "MNEMEONA_ANIMAGINE_XL_MODEL"
+    )
+
+    if animagine_xl_model:
+        config.setdefault(
+            "providers",
+            {},
+        ).setdefault(
+            "animagine_xl",
+            {},
+        )["model_path"] = animagine_xl_model
 
     return config
 

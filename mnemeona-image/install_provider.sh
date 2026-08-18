@@ -326,6 +326,83 @@ PY
         echo "  ${MODEL_DIR}"
         ;;
 
+    animagine_xl)
+        MODEL_DIR="${MODELS_DIR}/Animagine-XL-3.1"
+        MODEL_REPO="cagliostrolab/animagine-xl-3.1"
+
+        echo
+        echo "=========================================="
+        echo " Installing Animagine XL 3.1"
+        echo "=========================================="
+        echo
+        echo "Hugging Face repository:"
+        echo "  ${MODEL_REPO}"
+        echo
+        echo "Local installation directory:"
+        echo "  ${MODEL_DIR}"
+        echo
+        echo "License:"
+        echo "  CreativeML Open RAIL++-M"
+        echo
+        echo "Downloading the Diffusers model..."
+        echo
+
+        mkdir -p "${MODELS_DIR}"
+
+        python -m pip install \
+            "huggingface_hub>=0.32"
+
+        if [ -f "${MODEL_DIR}/model_index.json" ]; then
+            echo "Animagine XL 3.1 model already exists."
+            echo
+            echo "Skipping download."
+            echo
+        else
+            echo "Downloading Animagine XL 3.1..."
+            echo
+            echo "This model is large and may take some time."
+            echo
+
+            python - <<PY
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+
+model_dir = Path(
+    r"""${MODEL_DIR}"""
+)
+
+model_dir.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+snapshot_download(
+    repo_id="${MODEL_REPO}",
+    local_dir=str(model_dir),
+)
+
+print()
+print("Animagine XL 3.1 download complete.")
+print(f"Model location: {model_dir}")
+PY
+        fi
+
+        if [ ! -f "${MODEL_DIR}/model_index.json" ]; then
+            echo
+            echo "ERROR: Animagine XL 3.1 installation appears incomplete."
+            echo
+            echo "Expected:"
+            echo "  ${MODEL_DIR}/model_index.json"
+            echo
+            exit 1
+        fi
+
+        echo
+        echo "Animagine XL 3.1 model verified:"
+        echo "  ${MODEL_DIR}"
+        ;;
+
 
     *)
         echo

@@ -1,0 +1,35 @@
+{
+  "id": "animagine_xl",
+  "name": "Animagine XL 3.1",
+  "version": "1.0.0",
+  "type": "local-diffusers",
+  "enabled": true,
+  "module": "provider:AnimagineXLProvider",
+  "requirements": "requirements.txt",
+  "description": "Local Animagine XL 3.1 image generation using Stable Diffusion XL and Diffusers.",
+  "model": {
+    "repository": "cagliostrolab/animagine-xl-3.1",
+    "directory": "models/Animagine-XL-3.1",
+    "format": "diffusers"
+  },
+  "capabilities": {
+    "text_to_image": true,
+    "image_to_image": false,
+    "negative_prompt": true,
+    "seed": true,
+    "steps": true,
+    "guidance_scale": true,
+    "width": true,
+    "height": true
+  },
+  "defaults": {
+    "width": 832,
+    "height": 1216,
+    "steps": 20,
+    "guidance_scale": 7.0
+  },
+  "hardware": {
+    "recommended_vram_gb": 12,
+    "minimum_ram_gb": 16
+  }
+}

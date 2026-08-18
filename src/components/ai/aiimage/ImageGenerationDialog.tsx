@@ -68,9 +68,79 @@ const RECOMMENDED_STEPS: Record<string, number> = {
   lcm: 8,
   sdxl_dreamshaper: 25,
   sdxl_vega: 30,
+  ssd_1b: 20,
+  animagine_xl: 20,
 }
 
 const DEFAULT_STEPS = 25
+
+const STYLE_OPTIONS = [
+  { value: "fantasy-book", label: "Fantasy Book", prompt: "fantasy book cover illustration, rich painterly fantasy artwork, detailed digital painting" },
+  { value: "dark-fantasy", label: "Dark Fantasy", prompt: "dark fantasy illustration, dramatic atmosphere, rich shadows, gothic fantasy artwork" },
+  { value: "high-fantasy", label: "High Fantasy", prompt: "high fantasy illustration, epic magical atmosphere, elaborate fantasy details" },
+  { value: "photorealism", label: "Photorealism", prompt: "photorealistic portrait photography, realistic skin texture, natural facial detail" },
+  { value: "anime", label: "Anime", prompt: "high-quality anime illustration, clean linework, expressive anime character design" },
+  { value: "manga", label: "Manga", prompt: "detailed manga character artwork, clean ink linework, expressive features" },
+  { value: "western-comic", label: "Western Comic", prompt: "western comic book illustration, bold ink work, dynamic character rendering" },
+  { value: "oil-painting", label: "Oil Painting", prompt: "classical oil painting, visible painterly brushwork, rich layered pigments" },
+  { value: "watercolor", label: "Watercolor", prompt: "detailed watercolor illustration, delicate brushwork, translucent layered color" },
+  { value: "concept-art", label: "Concept Art", prompt: "professional character concept art, polished digital painting, production-quality detail" },
+  { value: "cinematic", label: "Cinematic", prompt: "cinematic character portrait, film-quality visual composition, dramatic visual storytelling" },
+]
+
+const COMPOSITION_OPTIONS = [
+  { value: "chest-up", label: "Chest-up portrait", prompt: "chest-up portrait" },
+  { value: "bust", label: "Bust portrait", prompt: "bust portrait" },
+  { value: "waist-up", label: "Waist-up", prompt: "waist-up portrait" },
+  { value: "full-body", label: "Full body", prompt: "full-body character portrait" },
+  { value: "close-up", label: "Close-up", prompt: "close-up portrait" },
+]
+
+const CAMERA_OPTIONS = [
+  { value: "three-quarter", label: "Three-quarter view", prompt: "three-quarter view, looking toward the camera" },
+  { value: "front", label: "Front view", prompt: "front-facing view, looking toward the camera" },
+  { value: "profile", label: "Profile", prompt: "side profile view" },
+  { value: "low-angle", label: "Low angle", prompt: "low-angle camera perspective" },
+  { value: "high-angle", label: "High angle", prompt: "high-angle camera perspective" },
+]
+
+const LIGHTING_OPTIONS = [
+  { value: "cinematic", label: "Cinematic", prompt: "cinematic lighting, soft shadows, subtle rim light" },
+  { value: "soft", label: "Soft studio", prompt: "soft studio lighting, gentle shadows, even illumination" },
+  { value: "golden-hour", label: "Golden hour", prompt: "warm golden-hour lighting, soft sunlight" },
+  { value: "moonlight", label: "Moonlight", prompt: "cool moonlight, soft blue shadows, subtle rim light" },
+  { value: "dramatic", label: "Dramatic", prompt: "dramatic directional lighting, strong highlights and shadows" },
+  { value: "candlelight", label: "Candlelight", prompt: "warm candlelight, flickering highlights, deep soft shadows" },
+  { value: "overcast", label: "Overcast", prompt: "soft overcast daylight, natural diffuse lighting" },
+]
+
+const MOOD_OPTIONS = [
+  { value: "neutral", label: "Neutral", prompt: "calm, natural expression and relaxed demeanor" },
+  { value: "heroic", label: "Heroic", prompt: "heroic presence, confident expression, noble demeanor" },
+  { value: "mysterious", label: "Mysterious", prompt: "mysterious atmosphere, enigmatic expression" },
+  { value: "dark", label: "Dark", prompt: "dark and ominous atmosphere, serious expression" },
+  { value: "joyful", label: "Joyful", prompt: "warm joyful expression, friendly and uplifting atmosphere" },
+  { value: "melancholic", label: "Melancholic", prompt: "melancholic mood, thoughtful and subdued expression" },
+  { value: "intimidating", label: "Intimidating", prompt: "intimidating presence, intense expression, commanding demeanor" },
+  { value: "peaceful", label: "Peaceful", prompt: "peaceful atmosphere, serene expression and relaxed demeanor" },
+]
+
+const BACKGROUND_OPTIONS = [
+  { value: "clean", label: "Clean background", prompt: "clean uncluttered background, centered composition" },
+  { value: "fantasy", label: "Fantasy environment", prompt: "immersive fantasy environment appropriate to the character" },
+  { value: "forest", label: "Forest", prompt: "detailed atmospheric fantasy forest background" },
+  { value: "castle", label: "Castle", prompt: "grand fantasy castle environment in the background" },
+  { value: "city", label: "City", prompt: "detailed atmospheric fantasy city background" },
+  { value: "tavern", label: "Tavern", prompt: "warm detailed fantasy tavern interior" },
+  { value: "studio", label: "Studio", prompt: "professional portrait studio background" },
+]
+
+function getOptionPrompt(
+  options: Array<{ value: string; prompt: string }>,
+  value: string,
+): string {
+  return options.find((option) => option.value === value)?.prompt ?? ""
+}
 
 function getRecommendedSteps(
   providerId: string,
@@ -83,6 +153,12 @@ function getRecommendedSteps(
 
 function buildCharacterPrompt(
   character: Character,
+  style = "fantasy-book",
+  composition = "chest-up",
+  camera = "three-quarter",
+  lighting = "cinematic",
+  mood = "neutral",
+  background = "clean",
 ): string {
   const sections: string[] = []
 
@@ -91,9 +167,7 @@ function buildCharacterPrompt(
   )
 
   if (character.age.trim()) {
-    sections.push(
-      `Age: ${character.age.trim()}.`,
-    )
+    sections.push(`Age: ${character.age.trim()}.`)
   }
 
   if (character.appearance.trim()) {
@@ -108,9 +182,13 @@ function buildCharacterPrompt(
     )
   }
 
+  sections.push(`${getOptionPrompt(STYLE_OPTIONS, style)}.`)
   sections.push(
-    "Chest-up portrait, three-quarter view, looking toward the camera, natural relaxed pose.",
+    `${getOptionPrompt(COMPOSITION_OPTIONS, composition)}, ${getOptionPrompt(CAMERA_OPTIONS, camera)}.`,
   )
+  sections.push(`${getOptionPrompt(MOOD_OPTIONS, mood)}.`)
+  sections.push(`${getOptionPrompt(LIGHTING_OPTIONS, lighting)}.`)
+  sections.push(`${getOptionPrompt(BACKGROUND_OPTIONS, background)}.`)
 
   sections.push(
     "Detailed face, expressive eyes, natural anatomy, realistic proportions.",
@@ -121,15 +199,7 @@ function buildCharacterPrompt(
   )
 
   sections.push(
-    "Cinematic lighting, soft shadows, subtle rim light, atmospheric depth.",
-  )
-
-  sections.push(
-    "High-quality fantasy character concept art, polished digital painting, detailed and professional.",
-  )
-
-  sections.push(
-    "Clean background, centered composition, sharp facial details.",
+    "Sharp facial details, high detail, polished professional artwork.",
   )
 
   sections.push(
@@ -168,6 +238,12 @@ export function ImageGenerationDialog({
     useState<ImageAiProvider[]>([])
 
   const [prompt, setPrompt] = useState("")
+  const [style, setStyle] = useState("fantasy-book")
+  const [composition, setComposition] = useState("chest-up")
+  const [camera, setCamera] = useState("three-quarter")
+  const [lighting, setLighting] = useState("cinematic")
+  const [mood, setMood] = useState("neutral")
+  const [background, setBackground] = useState("clean")
   const [width, setWidth] = useState(768)
   const [height, setHeight] = useState(768)
 
@@ -233,8 +309,23 @@ export function ImageGenerationDialog({
 
     setConfig(loaded)
 
+    setStyle("fantasy-book")
+    setComposition("chest-up")
+    setCamera("three-quarter")
+    setLighting("cinematic")
+    setMood("neutral")
+    setBackground("clean")
+
     setPrompt(
-      buildCharacterPrompt(character),
+      buildCharacterPrompt(
+        character,
+        "fantasy-book",
+        "chest-up",
+        "three-quarter",
+        "cinematic",
+        "neutral",
+        "clean",
+      ),
     )
 
     setWidth(768)
@@ -640,7 +731,66 @@ export function ImageGenerationDialog({
 
   function rebuildPrompt() {
     setPrompt(
-      buildCharacterPrompt(character),
+      buildCharacterPrompt(
+        character,
+        style,
+        composition,
+        camera,
+        lighting,
+        mood,
+        background,
+      ),
+    )
+
+    clearGeneratedImage()
+  }
+
+  function updatePromptStyle(
+    kind:
+      | "style"
+      | "composition"
+      | "camera"
+      | "lighting"
+      | "mood"
+      | "background",
+    value: string,
+  ) {
+    const nextStyle =
+      kind === "style" ? value : style
+    const nextComposition =
+      kind === "composition"
+        ? value
+        : composition
+    const nextCamera =
+      kind === "camera" ? value : camera
+    const nextLighting =
+      kind === "lighting"
+        ? value
+        : lighting
+    const nextMood =
+      kind === "mood" ? value : mood
+    const nextBackground =
+      kind === "background"
+        ? value
+        : background
+
+    if (kind === "style") setStyle(value)
+    if (kind === "composition") setComposition(value)
+    if (kind === "camera") setCamera(value)
+    if (kind === "lighting") setLighting(value)
+    if (kind === "mood") setMood(value)
+    if (kind === "background") setBackground(value)
+
+    setPrompt(
+      buildCharacterPrompt(
+        character,
+        nextStyle,
+        nextComposition,
+        nextCamera,
+        nextLighting,
+        nextMood,
+        nextBackground,
+      ),
     )
 
     clearGeneratedImage()
@@ -984,6 +1134,96 @@ export function ImageGenerationDialog({
                 </div>
 
                 <div>
+                  <div className="mb-3">
+                    <h3 className="text-sm font-medium">
+                      Visual style
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Choose how the image should look. Changing a selection
+                      automatically rebuilds the prompt.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {[
+                      {
+                        label: "Style",
+                        value: style,
+                        options: STYLE_OPTIONS,
+                        kind: "style" as const,
+                      },
+                      {
+                        label: "Composition",
+                        value: composition,
+                        options: COMPOSITION_OPTIONS,
+                        kind: "composition" as const,
+                      },
+                      {
+                        label: "Camera",
+                        value: camera,
+                        options: CAMERA_OPTIONS,
+                        kind: "camera" as const,
+                      },
+                      {
+                        label: "Lighting",
+                        value: lighting,
+                        options: LIGHTING_OPTIONS,
+                        kind: "lighting" as const,
+                      },
+                      {
+                        label: "Mood",
+                        value: mood,
+                        options: MOOD_OPTIONS,
+                        kind: "mood" as const,
+                      },
+                      {
+                        label: "Background",
+                        value: background,
+                        options: BACKGROUND_OPTIONS,
+                        kind: "background" as const,
+                      },
+                    ].map((control) => (
+                      <label
+                        key={control.label}
+                        className="text-xs"
+                      >
+                        {control.label}
+
+                        <select
+                          value={control.value}
+                          disabled={
+                            generating ||
+                            saving
+                          }
+                          onChange={(event) =>
+                            updatePromptStyle(
+                              control.kind,
+                              event.target.value,
+                            )
+                          }
+                          className="
+                            mt-1 h-9 w-full rounded-md border
+                            bg-background px-3 text-sm outline-none
+                            focus:ring-2 focus:ring-ring
+                          "
+                        >
+                          {control.options.map(
+                            (option) => (
+                              <option
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
                   <div className="mb-2 flex items-center justify-between">
                     <div>
                       <h3 className="text-sm font-medium">
@@ -1174,6 +1414,33 @@ export function ImageGenerationDialog({
                               ),
                             )
                           }
+                        />
+                      </label>
+
+                      <label className="mt-3 block text-xs">
+                        Negative prompt
+
+                        <textarea
+                          value={String(
+                            config.settings.negative_prompt ??
+                              "",
+                          )}
+                          disabled={
+                            generating ||
+                            saving
+                          }
+                          onChange={(event) =>
+                            updateProviderSetting(
+                              "negative_prompt",
+                              event.target.value,
+                            )
+                          }
+                          placeholder="Things you do not want in the image..."
+                          className="
+                            mt-1 min-h-20 w-full resize-y rounded-md
+                            border bg-background p-2 text-xs outline-none
+                            focus:ring-2 focus:ring-ring
+                          "
                         />
                       </label>
 
