@@ -1,0 +1,9 @@
+{
+  "id": "ssd_1b",
+  "name": "Segmind SSD-1B",
+  "version": "1.0.0",
+  "type": "local-diffusers",
+  "module": "provider:SSD1BProvider",
+  "requirements": "requirements.txt",
+  "model_path": "models/SSD-1B"
+}

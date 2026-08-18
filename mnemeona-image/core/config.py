@@ -85,6 +85,32 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "vae_tiling": True,
             },
         },
+
+        "ssd_1b": {
+            "enabled": True,
+
+            "model_path": (
+                "./models/SSD-1B"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "guidance_scale": 9.0,
+                "negative_prompt": (
+                    "worst quality, low quality, "
+                    "blurry, distorted, deformed, "
+                    "bad anatomy, bad proportions, "
+                    "extra fingers, missing fingers, "
+                    "extra limbs, malformed hands"
+                ),
+                "attention_slicing": True,
+                "vae_slicing": True,
+                "vae_tiling": True,
+                "use_cpu_offload": True,
+            },
+        },
     },
 
     "gpu_coordination": {
@@ -194,6 +220,19 @@ def load_config() -> dict[str, Any]:
             "lcm",
             {},
         )["model_path"] = lcm_model
+
+    ssd_1b_model = os.getenv(
+        "MNEMEONA_SSD_1B_MODEL"
+    )
+
+    if ssd_1b_model:
+        config.setdefault(
+            "providers",
+            {},
+        ).setdefault(
+            "ssd_1b",
+            {},
+        )["model_path"] = ssd_1b_model
 
     return config
 

@@ -115,7 +115,9 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
-model_dir = Path(r"""${MODEL_DIR}""")
+model_dir = Path(
+    r"""${MODEL_DIR}"""
+)
 
 model_dir.mkdir(
     parents=True,
@@ -147,6 +149,96 @@ PY
         echo "LCM model verified:"
         echo "  ${MODEL_DIR}"
         ;;
+
+
+    ssd_1b)
+        MODEL_DIR="${MODELS_DIR}/SSD-1B"
+        MODEL_REPO="segmind/SSD-1B"
+
+        echo
+        echo "=========================================="
+        echo " Installing Segmind SSD-1B"
+        echo "=========================================="
+        echo
+        echo "Hugging Face repository:"
+        echo "  ${MODEL_REPO}"
+        echo
+        echo "Local installation directory:"
+        echo "  ${MODEL_DIR}"
+        echo
+        echo "License:"
+        echo "  Apache 2.0"
+        echo
+        echo "Only the Diffusers model files required"
+        echo "by Mnemeona will be downloaded."
+        echo
+
+        mkdir -p "${MODELS_DIR}"
+
+        python -m pip install \
+            "huggingface_hub>=0.32"
+
+        if [ -f "${MODEL_DIR}/model_index.json" ]; then
+            echo "SSD-1B model already exists."
+            echo
+            echo "Skipping download."
+            echo
+        else
+            echo "Downloading SSD-1B..."
+            echo
+            echo "This may take several minutes."
+            echo
+
+            python - <<PY
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+
+model_dir = Path(
+    r"""${MODEL_DIR}"""
+)
+
+model_dir.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+snapshot_download(
+    repo_id="${MODEL_REPO}",
+    local_dir=str(model_dir),
+    allow_patterns=[
+        "model_index.json",
+        "scheduler/*",
+        "text_encoder/*",
+        "text_encoder_2/*",
+        "tokenizer/*",
+        "tokenizer_2/*",
+        "unet/*",
+        "vae/*",
+    ],
+)
+
+print()
+print("SSD-1B model download complete.")
+print(f"Model location: {model_dir}")
+PY
+        fi
+
+        if [ ! -f "${MODEL_DIR}/model_index.json" ]; then
+            echo
+            echo "ERROR: SSD-1B installation appears incomplete."
+            echo
+            echo "Expected:"
+            echo "  ${MODEL_DIR}/model_index.json"
+            echo
+            exit 1
+        fi
+
+        echo
+        echo "SSD-1B model verified:"
+        echo "  ${MODEL_DIR}"
+        ;;
+
 
     sdxl_dreamshaper)
         MODEL_DIR="${MODELS_DIR}/DreamShaper_XL"
@@ -195,7 +287,9 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
-model_dir = Path(r"""${MODEL_DIR}""")
+model_dir = Path(
+    r"""${MODEL_DIR}"""
+)
 
 model_dir.mkdir(
     parents=True,
@@ -231,6 +325,7 @@ PY
         echo "DreamShaper XL model verified:"
         echo "  ${MODEL_DIR}"
         ;;
+
 
     *)
         echo
