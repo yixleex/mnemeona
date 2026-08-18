@@ -1,0 +1,34 @@
+{
+  "id": "sdxl_dreamshaper",
+  "name": "DreamShaper XL",
+  "version": "1.0.0",
+  "type": "local-diffusers",
+  "enabled": true,
+  "module": "provider:SDXLDreamShaperProvider",
+  "description": "Local DreamShaper XL image generation using Stable Diffusion XL and Diffusers.",
+  "model": {
+    "repository": "Lykon/dreamshaper-xl-1-0",
+    "directory": "models/DreamShaper_XL",
+    "format": "diffusers"
+  },
+  "capabilities": {
+    "text_to_image": true,
+    "image_to_image": false,
+    "negative_prompt": true,
+    "seed": true,
+    "steps": true,
+    "guidance_scale": true,
+    "width": true,
+    "height": true
+  },
+  "defaults": {
+    "width": 768,
+    "height": 768,
+    "steps": 25,
+    "guidance_scale": 7.5
+  },
+  "hardware": {
+    "recommended_vram_gb": 8,
+    "minimum_ram_gb": 16
+  }
+}

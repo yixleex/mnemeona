@@ -79,7 +79,6 @@ echo "Provider dependencies installed."
 case "${PROVIDER}" in
 
     lcm)
-
         MODEL_DIR="${MODELS_DIR}/LCM_Dreamshaper_v7"
         MODEL_REPO="SimianLuo/LCM_Dreamshaper_v7"
 
@@ -97,17 +96,8 @@ case "${PROVIDER}" in
 
         mkdir -p "${MODELS_DIR}"
 
-        #
-        # Install huggingface_hub explicitly.
-        #
-
         python -m pip install \
             "huggingface_hub>=0.32"
-
-        #
-        # Check whether a usable Diffusers model
-        # already exists.
-        #
 
         if [ -f "${MODEL_DIR}/model_index.json" ]; then
             echo "LCM model already exists."
@@ -143,10 +133,6 @@ print(f"Model location: {model_dir}")
 PY
         fi
 
-        #
-        # Verify the installation.
-        #
-
         if [ ! -f "${MODEL_DIR}/model_index.json" ]; then
             echo
             echo "ERROR: LCM model installation appears incomplete."
@@ -162,18 +148,14 @@ PY
         echo "  ${MODEL_DIR}"
         ;;
 
-    sdxl_vega)
-
-        MODEL_DIR="${MODELS_DIR}/Segmind-Vega"
-        MODEL_REPO="segmind/Segmind-Vega"
+    sdxl_dreamshaper)
+        MODEL_DIR="${MODELS_DIR}/DreamShaper_XL"
+        MODEL_REPO="Lykon/dreamshaper-xl-1-0"
 
         echo
         echo "=========================================="
-        echo " Installing Segmind-Vega"
+        echo " Installing DreamShaper XL"
         echo "=========================================="
-        echo
-        echo "License:"
-        echo "  Apache 2.0"
         echo
         echo "Hugging Face repository:"
         echo "  ${MODEL_REPO}"
@@ -185,30 +167,27 @@ PY
         mkdir -p "${MODELS_DIR}"
 
         #
-        # Install huggingface_hub explicitly.
+        # Make sure huggingface_hub is available
+        # even if provider requirements change.
         #
 
         python -m pip install \
             "huggingface_hub>=0.32"
 
         #
-        # Check whether a complete Diffusers
-        # installation already exists.
+        # Check whether a usable Diffusers model
+        # already exists.
         #
 
         if [ -f "${MODEL_DIR}/model_index.json" ]; then
-
-            echo "Segmind-Vega model already exists."
+            echo "DreamShaper XL model already exists."
             echo
             echo "Skipping download."
             echo
-
         else
-
-            echo "Downloading Segmind-Vega..."
+            echo "Downloading DreamShaper XL..."
             echo
-            echo "This model is several GB."
-            echo "The files will be stored locally."
+            echo "This model is large and may take some time."
             echo
 
             python - <<PY
@@ -216,9 +195,7 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
-model_dir = Path(
-    r"""${MODEL_DIR}"""
-)
+model_dir = Path(r"""${MODEL_DIR}""")
 
 model_dir.mkdir(
     parents=True,
@@ -231,10 +208,9 @@ snapshot_download(
 )
 
 print()
-print("Segmind-Vega download complete.")
+print("DreamShaper XL download complete.")
 print(f"Model location: {model_dir}")
 PY
-
         fi
 
         #
@@ -243,24 +219,20 @@ PY
 
         if [ ! -f "${MODEL_DIR}/model_index.json" ]; then
             echo
-            echo "ERROR: Segmind-Vega installation appears incomplete."
+            echo "ERROR: DreamShaper XL installation appears incomplete."
             echo
             echo "Expected:"
             echo "  ${MODEL_DIR}/model_index.json"
-            echo
-            echo "The downloaded repository does not appear"
-            echo "to contain a complete Diffusers pipeline."
             echo
             exit 1
         fi
 
         echo
-        echo "Segmind-Vega model verified:"
+        echo "DreamShaper XL model verified:"
         echo "  ${MODEL_DIR}"
         ;;
 
     *)
-
         echo
         echo "No automatic model downloader is configured"
         echo "for provider: ${PROVIDER}"

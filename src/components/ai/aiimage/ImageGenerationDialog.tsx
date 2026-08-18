@@ -53,61 +53,84 @@ type GenerationStatus =
   | "success"
   | "error"
 
-  function buildCharacterPrompt(
-    character: Character,
-  ): string {
-    const sections: string[] = []
+/**
+ * Recommended inference steps for each model.
+ *
+ * These are applied automatically when the user selects
+ * a provider. The user can still manually change Steps afterward.
+ */
+const RECOMMENDED_STEPS: Record<string, number> = {
+  lcm: 8,
+  sdxl_dreamshaper: 25,
+  sdxl_vega: 30,
+}
 
-    sections.push(
-      `Portrait of ${character.name || "a character"}.`,
-    )
+const DEFAULT_STEPS = 25
 
-    if (character.age.trim()) {
-      sections.push(`Age: ${character.age.trim()}.`)
-    }
+function getRecommendedSteps(
+  providerId: string,
+): number {
+  return (
+    RECOMMENDED_STEPS[providerId] ??
+    DEFAULT_STEPS
+  )
+}
 
-    if (character.appearance.trim()) {
-      sections.push(
-        `Appearance: ${character.appearance.trim()}`,
-      )
-    }
+function buildCharacterPrompt(
+  character: Character,
+): string {
+  const sections: string[] = []
 
-    if (character.personality.trim()) {
-      sections.push(
-        `Facial expression and demeanor reflecting this personality: ${character.personality.trim()}`,
-      )
-    }
+  sections.push(
+    `Portrait of ${character.name || "a character"}.`,
+  )
 
-    sections.push(
-      "Chest-up portrait, three-quarter view, looking toward the camera, natural relaxed pose.",
-    )
-
-    sections.push(
-      "Detailed face, expressive eyes, natural anatomy, realistic proportions.",
-    )
-
-    sections.push(
-      "Detailed clothing appropriate to the character's appearance and setting.",
-    )
-
-    sections.push(
-      "Cinematic lighting, soft shadows, subtle rim light, atmospheric depth.",
-    )
-
-    sections.push(
-      "High-quality fantasy character concept art, polished digital painting, detailed and professional.",
-    )
-
-    sections.push(
-      "Clean background, centered composition, sharp facial details.",
-    )
-
-    sections.push(
-      "No text, no captions, no logo, no watermark, no signature.",
-    )
-
-    return sections.join("\n\n")
+  if (character.age.trim()) {
+    sections.push(`Age: ${character.age.trim()}.`)
   }
+
+  if (character.appearance.trim()) {
+    sections.push(
+      `Appearance: ${character.appearance.trim()}`,
+    )
+  }
+
+  if (character.personality.trim()) {
+    sections.push(
+      `Facial expression and demeanor reflecting this personality: ${character.personality.trim()}`,
+    )
+  }
+
+  sections.push(
+    "Chest-up portrait, three-quarter view, looking toward the camera, natural relaxed pose.",
+  )
+
+  sections.push(
+    "Detailed face, expressive eyes, natural anatomy, realistic proportions.",
+  )
+
+  sections.push(
+    "Detailed clothing appropriate to the character's appearance and setting.",
+  )
+
+  sections.push(
+    "Cinematic lighting, soft shadows, subtle rim light, atmospheric depth.",
+  )
+
+  sections.push(
+    "High-quality fantasy character concept art, polished digital painting, detailed and professional.",
+  )
+
+  sections.push(
+    "Clean background, centered composition, sharp facial details.",
+  )
+
+  sections.push(
+    "No text, no captions, no logo, no watermark, no signature.",
+  )
+
+  return sections.join("\n\n")
+}
 
 function createImageId(): string {
   if (
@@ -140,7 +163,12 @@ export function ImageGenerationDialog({
   const [prompt, setPrompt] = useState("")
   const [width, setWidth] = useState(768)
   const [height, setHeight] = useState(768)
-  const [steps, setSteps] = useState(4)
+
+  const [steps, setSteps] = useState(() =>
+    getRecommendedSteps(
+      loadImageAiConfig().provider,
+    ),
+  )
 
   const [status, setStatus] =
     useState<GenerationStatus>("idle")
@@ -199,7 +227,11 @@ export function ImageGenerationDialog({
     setPrompt(buildCharacterPrompt(character))
     setWidth(768)
     setHeight(768)
-    setSteps(4)
+    setSteps(
+      getRecommendedSteps(
+        loaded.provider,
+      ),
+    )
     setStatus("idle")
     setProgress(0)
     setError("")
@@ -300,6 +332,29 @@ export function ImageGenerationDialog({
         [key]: value,
       },
     })
+  }
+
+  function selectProvider(
+    providerId: string,
+  ) {
+    const recommendedSteps =
+      getRecommendedSteps(providerId)
+
+    updateConfig({
+      provider: providerId,
+    })
+
+    setSteps(recommendedSteps)
+
+    // Selecting a new model means the previous generated
+    // image no longer represents the current settings.
+    setGeneratedBlob(null)
+    setGeneratedSeed(undefined)
+    setGeneratedProvider(undefined)
+    setSavedImageId(null)
+    setStatus("idle")
+    setError("")
+    setProgress(0)
   }
 
   async function handleTestConnection() {
@@ -724,16 +779,20 @@ export function ImageGenerationDialog({
                             provider,
                           )
 
+                        const recommendedSteps =
+                          getRecommendedSteps(
+                            provider.id,
+                          )
+
                         return (
                           <button
                             key={provider.id}
                             type="button"
                             disabled={!available}
                             onClick={() =>
-                              updateConfig({
-                                provider:
-                                  provider.id,
-                              })
+                              selectProvider(
+                                provider.id,
+                              )
                             }
                             className={`
                               rounded-xl border p-3 text-left
@@ -763,6 +822,8 @@ export function ImageGenerationDialog({
                                   {provider.version
                                     ? ` · v${provider.version}`
                                     : ""}
+
+                                  {` · ${recommendedSteps} steps recommended`}
                                 </div>
                               </div>
 
@@ -880,6 +941,11 @@ export function ImageGenerationDialog({
                       />
                     </label>
                   </div>
+
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    Automatically set to the recommended value when
+                    changing models. You can still adjust it manually.
+                  </p>
 
                   <Button
                     variant="ghost"

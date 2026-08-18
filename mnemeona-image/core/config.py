@@ -36,19 +36,56 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
 
         "sdxl_vega": {
-          "enabled": True,
-          "model_path": "./models/Segmind-Vega",
-          "device": "auto",
-          "dtype": "float16",
-          "settings": {
-            "guidance_scale": 9.0,
-            "negative_prompt": "worst quality, low quality, blurry, distorted, deformed, bad anatomy",
-            "attention_slicing": True,
-            "vae_slicing": True,
-            "vae_tiling": True
-          }
+            "enabled": True,
+
+            "model_path": (
+                "./models/Segmind-Vega"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "guidance_scale": 9.0,
+                "negative_prompt": (
+                    "worst quality, low quality, "
+                    "blurry, distorted, deformed, "
+                    "bad anatomy"
+                ),
+                "attention_slicing": True,
+                "vae_slicing": True,
+                "vae_tiling": True,
+            },
         },
 
+        "sdxl_dreamshaper": {
+            "enabled": True,
+
+            "model_path": (
+                "./models/DreamShaper_XL"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "guidance_scale": 7.5,
+                "negative_prompt": (
+                    "text, letters, words, captions, "
+                    "logo, watermark, signature, "
+                    "worst quality, low quality, "
+                    "blurry, distorted, deformed, "
+                    "bad anatomy, bad proportions, "
+                    "extra fingers, missing fingers, "
+                    "extra limbs, malformed hands, "
+                    "duplicate person"
+                ),
+                "attention_slicing": True,
+                "vae_slicing": True,
+                "vae_tiling": True,
+            },
+        },
+    },
 
     "gpu_coordination": {
         "enabled": True,
@@ -58,7 +95,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "reload_after_image": True,
         "timeout_seconds": 10,
     },
-}}
+}
 
 
 def config_path() -> Path:
