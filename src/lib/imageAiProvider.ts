@@ -4,7 +4,7 @@ export interface ImageAiProvider {
   version?: string
   type?: string
   enabled: boolean
-  installed: boolean
+  installed?: boolean
   active: boolean
 }
 

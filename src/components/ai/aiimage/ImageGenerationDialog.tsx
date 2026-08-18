@@ -53,59 +53,61 @@ type GenerationStatus =
   | "success"
   | "error"
 
-function buildCharacterPrompt(
-  character: Character,
-): string {
-  const sections: string[] = []
+  function buildCharacterPrompt(
+    character: Character,
+  ): string {
+    const sections: string[] = []
 
-  sections.push(
-    `A high-quality portrait of ${
-      character.name || "this character"
-    }.`,
-  )
-
-  if (character.age.trim()) {
-    sections.push(`Age: ${character.age.trim()}.`)
-  }
-
-  if (character.appearance.trim()) {
     sections.push(
-      `Physical appearance: ${character.appearance.trim()}`,
+      `Portrait of ${character.name || "a character"}.`,
     )
-  }
 
-  if (character.role.trim()) {
+    if (character.age.trim()) {
+      sections.push(`Age: ${character.age.trim()}.`)
+    }
+
+    if (character.appearance.trim()) {
+      sections.push(
+        `Appearance: ${character.appearance.trim()}`,
+      )
+    }
+
+    if (character.personality.trim()) {
+      sections.push(
+        `Facial expression and demeanor reflecting this personality: ${character.personality.trim()}`,
+      )
+    }
+
     sections.push(
-      `Story role: ${character.role.trim()}.`,
+      "Chest-up portrait, three-quarter view, looking toward the camera, natural relaxed pose.",
     )
-  }
 
-  if (character.personality.trim()) {
     sections.push(
-      `Personality and demeanor: ${character.personality.trim()}`,
+      "Detailed face, expressive eyes, natural anatomy, realistic proportions.",
     )
-  }
 
-  if (character.background.trim()) {
     sections.push(
-      `Background context: ${character.background.trim()}`,
+      "Detailed clothing appropriate to the character's appearance and setting.",
     )
+
+    sections.push(
+      "Cinematic lighting, soft shadows, subtle rim light, atmospheric depth.",
+    )
+
+    sections.push(
+      "High-quality fantasy character concept art, polished digital painting, detailed and professional.",
+    )
+
+    sections.push(
+      "Clean background, centered composition, sharp facial details.",
+    )
+
+    sections.push(
+      "No text, no captions, no logo, no watermark, no signature.",
+    )
+
+    return sections.join("\n\n")
   }
-
-  sections.push(
-    "Chest-up character portrait, clear face, strong facial identity, natural proportions.",
-  )
-
-  sections.push(
-    "Professional fantasy novel character concept art, cinematic lighting, detailed clothing, rich atmosphere, polished digital illustration.",
-  )
-
-  sections.push(
-    "No text, no captions, no logo, no watermark.",
-  )
-
-  return sections.join("\n\n")
-}
 
 function createImageId(): string {
   if (
@@ -211,6 +213,24 @@ export function ImageGenerationDialog({
     void refreshProviders()
   }, [open, character.id])
 
+  /**
+   * A provider returned by mnemeona-image is already installed/discovered.
+   *
+   * `installed` is therefore optional:
+   *
+   *   undefined → provider was discovered, so available
+   *   true      → explicitly available
+   *   false     → explicitly unavailable
+   */
+  function isProviderAvailable(
+    provider: ImageAiProvider,
+  ): boolean {
+    return (
+      provider.enabled &&
+      provider.installed !== false
+    )
+  }
+
   async function refreshProviders() {
     try {
       const result =
@@ -223,8 +243,7 @@ export function ImageGenerationDialog({
           result.providers.some(
             (provider) =>
               provider.id === current.provider &&
-              provider.enabled &&
-              provider.installed,
+              isProviderAvailable(provider),
           )
 
         const next = selectedExists
@@ -232,9 +251,18 @@ export function ImageGenerationDialog({
           : {
               ...current,
               provider:
-                result.active_provider ||
-                result.providers[0]?.id ||
-                current.provider,
+                result.active_provider &&
+                result.providers.some(
+                  (provider) =>
+                    provider.id ===
+                      result.active_provider &&
+                    isProviderAvailable(provider),
+                )
+                  ? result.active_provider
+                  : result.providers.find(
+                      isProviderAvailable,
+                    )?.id ||
+                    current.provider,
             }
 
         saveImageAiConfig(next)
@@ -307,6 +335,21 @@ export function ImageGenerationDialog({
     if (!prompt.trim()) {
       setError(
         "Enter an image prompt before generating.",
+      )
+
+      return
+    }
+
+    const selectedProvider =
+      providers.find(
+        (provider) =>
+          provider.id === config.provider &&
+          isProviderAvailable(provider),
+      )
+
+    if (!selectedProvider) {
+      setError(
+        "The selected image AI provider is not available.",
       )
 
       return
@@ -675,58 +718,63 @@ export function ImageGenerationDialog({
                         and refresh.
                       </div>
                     ) : (
-                      providers.map((provider) => (
-                        <button
-                          key={provider.id}
-                          type="button"
-                          disabled={
-                            !provider.enabled ||
-                            !provider.installed
-                          }
-                          onClick={() =>
-                            updateConfig({
-                              provider: provider.id,
-                            })
-                          }
-                          className={`
-                            rounded-xl border p-3 text-left
-                            transition
-                            ${
-                              config.provider === provider.id
-                                ? "border-primary bg-primary/5"
-                                : "hover:bg-muted/50"
+                      providers.map((provider) => {
+                        const available =
+                          isProviderAvailable(
+                            provider,
+                          )
+
+                        return (
+                          <button
+                            key={provider.id}
+                            type="button"
+                            disabled={!available}
+                            onClick={() =>
+                              updateConfig({
+                                provider:
+                                  provider.id,
+                              })
                             }
-                            ${
-                              !provider.enabled ||
-                              !provider.installed
-                                ? "cursor-not-allowed opacity-50"
-                                : ""
-                            }
-                          `}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium">
-                                {provider.name}
+                            className={`
+                              rounded-xl border p-3 text-left
+                              transition
+                              ${
+                                config.provider ===
+                                provider.id
+                                  ? "border-primary bg-primary/5"
+                                  : "hover:bg-muted/50"
+                              }
+                              ${
+                                !available
+                                  ? "cursor-not-allowed opacity-50"
+                                  : ""
+                              }
+                            `}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium">
+                                  {provider.name}
+                                </div>
+
+                                <div className="mt-1 text-[10px] text-muted-foreground">
+                                  {provider.id}
+
+                                  {provider.version
+                                    ? ` · v${provider.version}`
+                                    : ""}
+                                </div>
                               </div>
 
-                              <div className="mt-1 text-[10px] text-muted-foreground">
-                                {provider.id}
-
-                                {provider.version
-                                  ? ` · v${provider.version}`
-                                  : ""}
-                              </div>
+                              {provider.active && (
+                                <span className="rounded-full bg-muted px-2 py-1 text-[10px]">
+                                  backend default
+                                </span>
+                              )}
                             </div>
-
-                            {provider.active && (
-                              <span className="rounded-full bg-muted px-2 py-1 text-[10px]">
-                                backend default
-                              </span>
-                            )}
-                          </div>
-                        </button>
-                      ))
+                          </button>
+                        )
+                      })
                     )}
                   </div>
                 </div>
@@ -743,7 +791,9 @@ export function ImageGenerationDialog({
                       variant="ghost"
                       size="sm"
                       onClick={rebuildPrompt}
-                      disabled={generating || saving}
+                      disabled={
+                        generating || saving
+                      }
                     >
                       Rebuild
                     </Button>
@@ -784,7 +834,9 @@ export function ImageGenerationDialog({
                         value={width}
                         onChange={(event) =>
                           setWidth(
-                            Number(event.target.value),
+                            Number(
+                              event.target.value,
+                            ),
                           )
                         }
                       />
@@ -801,7 +853,9 @@ export function ImageGenerationDialog({
                         value={height}
                         onChange={(event) =>
                           setHeight(
-                            Number(event.target.value),
+                            Number(
+                              event.target.value,
+                            ),
                           )
                         }
                       />
@@ -814,11 +868,13 @@ export function ImageGenerationDialog({
                         className="mt-1"
                         type="number"
                         min={1}
-                        max={8}
+                        max={50}
                         value={steps}
                         onChange={(event) =>
                           setSteps(
-                            Number(event.target.value),
+                            Number(
+                              event.target.value,
+                            ),
                           )
                         }
                       />
@@ -849,12 +905,10 @@ export function ImageGenerationDialog({
                           className="mt-1"
                           type="number"
                           step="0.5"
-                          value={
-                            Number(
-                              config.settings
-                                .guidance_scale ?? 8,
-                            )
-                          }
+                          value={Number(
+                            config.settings
+                              .guidance_scale ?? 8,
+                          )}
                           onChange={(event) =>
                             updateProviderSetting(
                               "guidance_scale",
@@ -913,7 +967,15 @@ export function ImageGenerationDialog({
                       generating ||
                       saving ||
                       !prompt.trim() ||
-                      providers.length === 0
+                      providers.length === 0 ||
+                      !providers.some(
+                        (provider) =>
+                          provider.id ===
+                            config.provider &&
+                          isProviderAvailable(
+                            provider,
+                          ),
+                      )
                     }
                   >
                     {generating ? (
