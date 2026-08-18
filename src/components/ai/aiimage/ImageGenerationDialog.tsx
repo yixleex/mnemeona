@@ -56,8 +56,13 @@ type GenerationStatus =
 /**
  * Recommended inference steps for each model.
  *
- * These are applied automatically when the user selects
- * a provider. The user can still manually change Steps afterward.
+ * LCM DreamShaper v7 performs particularly well around
+ * 8 steps, so that is the preferred default for LCM.
+ *
+ * These values are automatically applied whenever the
+ * user selects a provider.
+ *
+ * The user can still manually change Steps afterward.
  */
 const RECOMMENDED_STEPS: Record<string, number> = {
   lcm: 8,
@@ -86,7 +91,9 @@ function buildCharacterPrompt(
   )
 
   if (character.age.trim()) {
-    sections.push(`Age: ${character.age.trim()}.`)
+    sections.push(
+      `Age: ${character.age.trim()}.`,
+    )
   }
 
   if (character.appearance.trim()) {
@@ -194,6 +201,7 @@ export function ImageGenerationDialog({
     useState<string | null>(null)
 
   const [testing, setTesting] = useState(false)
+
   const [showSettings, setShowSettings] =
     useState(false)
 
@@ -224,14 +232,20 @@ export function ImageGenerationDialog({
     const loaded = loadImageAiConfig()
 
     setConfig(loaded)
-    setPrompt(buildCharacterPrompt(character))
+
+    setPrompt(
+      buildCharacterPrompt(character),
+    )
+
     setWidth(768)
     setHeight(768)
+
     setSteps(
       getRecommendedSteps(
         loaded.provider,
       ),
     )
+
     setStatus("idle")
     setProgress(0)
     setError("")
@@ -246,13 +260,14 @@ export function ImageGenerationDialog({
   }, [open, character.id])
 
   /**
-   * A provider returned by mnemeona-image is already installed/discovered.
+   * The backend registry now only returns providers
+   * whose model actually exists.
    *
-   * `installed` is therefore optional:
+   * Therefore a provider appearing in this list is
+   * already considered installed/available.
    *
-   *   undefined → provider was discovered, so available
-   *   true      → explicitly available
-   *   false     → explicitly unavailable
+   * We still respect `enabled` and the optional
+   * `installed` flag for backwards compatibility.
    */
   function isProviderAvailable(
     provider: ImageAiProvider,
@@ -263,39 +278,75 @@ export function ImageGenerationDialog({
     )
   }
 
+  /**
+   * Clear the current generated image because changing
+   * the provider means the existing image no longer
+   * represents the currently selected model/settings.
+   */
+  function clearGeneratedImage() {
+    setGeneratedBlob(null)
+    setGeneratedSeed(undefined)
+    setGeneratedProvider(undefined)
+    setSavedImageId(null)
+    setStatus("idle")
+    setError("")
+    setProgress(0)
+  }
+
   async function refreshProviders() {
     try {
       const result =
         await getImageProviders()
 
-      setProviders(result.providers)
+      /**
+       * The backend registry filters missing models.
+       *
+       * We additionally filter here defensively so the
+       * UI never displays a provider explicitly reported
+       * as unavailable.
+       */
+      const availableProviders =
+        result.providers.filter(
+          isProviderAvailable,
+        )
+
+      setProviders(availableProviders)
 
       setConfig((current) => {
         const selectedExists =
-          result.providers.some(
+          availableProviders.some(
             (provider) =>
-              provider.id === current.provider &&
-              isProviderAvailable(provider),
+              provider.id ===
+              current.provider,
           )
 
-        const next = selectedExists
-          ? current
-          : {
-              ...current,
-              provider:
-                result.active_provider &&
-                result.providers.some(
-                  (provider) =>
-                    provider.id ===
-                      result.active_provider &&
-                    isProviderAvailable(provider),
-                )
-                  ? result.active_provider
-                  : result.providers.find(
-                      isProviderAvailable,
-                    )?.id ||
-                    current.provider,
-            }
+        const backendActiveProvider =
+          result.active_provider
+
+        const backendActiveExists =
+          backendActiveProvider &&
+          availableProviders.some(
+            (provider) =>
+              provider.id ===
+              backendActiveProvider,
+          )
+
+        const fallbackProvider =
+          availableProviders[0]?.id
+
+        const nextProvider =
+          selectedExists
+            ? current.provider
+            : backendActiveExists
+              ? backendActiveProvider
+              : fallbackProvider
+
+        const next = {
+          ...current,
+          provider:
+            nextProvider ||
+            current.provider,
+        }
 
         saveImageAiConfig(next)
 
@@ -334,9 +385,32 @@ export function ImageGenerationDialog({
     })
   }
 
+  /**
+   * Selecting a model automatically applies its
+   * recommended inference step count.
+   *
+   * For example:
+   *
+   *   LCM DreamShaper → 8 steps
+   *   DreamShaper XL  → 25 steps
+   *   Segmind Vega    → 30 steps
+   */
   function selectProvider(
     providerId: string,
   ) {
+    const provider =
+      providers.find(
+        (item) =>
+          item.id === providerId,
+      )
+
+    if (
+      !provider ||
+      !isProviderAvailable(provider)
+    ) {
+      return
+    }
+
     const recommendedSteps =
       getRecommendedSteps(providerId)
 
@@ -346,15 +420,7 @@ export function ImageGenerationDialog({
 
     setSteps(recommendedSteps)
 
-    // Selecting a new model means the previous generated
-    // image no longer represents the current settings.
-    setGeneratedBlob(null)
-    setGeneratedSeed(undefined)
-    setGeneratedProvider(undefined)
-    setSavedImageId(null)
-    setStatus("idle")
-    setError("")
-    setProgress(0)
+    clearGeneratedImage()
   }
 
   async function handleTestConnection() {
@@ -366,15 +432,62 @@ export function ImageGenerationDialog({
       const result =
         await getImageProviders()
 
-      setProviders(result.providers)
+      const availableProviders =
+        result.providers.filter(
+          isProviderAvailable,
+        )
+
+      setProviders(availableProviders)
 
       setTestMessage(
-        `${result.providers.length} image AI provider${
-          result.providers.length === 1 ? "" : "s"
+        `${availableProviders.length} installed image AI provider${
+          availableProviders.length === 1
+            ? ""
+            : "s"
         } detected. Active: ${
-          result.active_provider || "none"
+          result.active_provider ||
+          "none"
         }.`,
       )
+
+      /**
+       * Keep the selected provider valid after
+       * refreshing the backend.
+       */
+      setConfig((current) => {
+        const stillAvailable =
+          availableProviders.some(
+            (provider) =>
+              provider.id ===
+              current.provider,
+          )
+
+        if (stillAvailable) {
+          return current
+        }
+
+        const fallback =
+          availableProviders[0]?.id
+
+        if (!fallback) {
+          return current
+        }
+
+        const next = {
+          ...current,
+          provider: fallback,
+        }
+
+        saveImageAiConfig(next)
+
+        setSteps(
+          getRecommendedSteps(
+            fallback,
+          ),
+        )
+
+        return next
+      })
     } catch (testError) {
       setTestMessage(
         testError instanceof Error
@@ -398,7 +511,8 @@ export function ImageGenerationDialog({
     const selectedProvider =
       providers.find(
         (provider) =>
-          provider.id === config.provider &&
+          provider.id ===
+            config.provider &&
           isProviderAvailable(provider),
       )
 
@@ -425,28 +539,35 @@ export function ImageGenerationDialog({
     setSavedImageId(null)
 
     try {
-      const result = await generateImage({
-        prompt: prompt.trim(),
-        width,
-        height,
-        steps,
-        provider: config.provider,
-        settings: config.settings,
-        signal: abortController.signal,
-        onProgress: (value) =>
-          setProgress(value),
-      })
+      const result =
+        await generateImage({
+          prompt: prompt.trim(),
+          width,
+          height,
+          steps,
+          provider: config.provider,
+          settings: config.settings,
+          signal:
+            abortController.signal,
+          onProgress: (value) =>
+            setProgress(value),
+        })
 
       setGeneratedBlob(result.blob)
-      setGeneratedMimeType(result.mimeType)
+      setGeneratedMimeType(
+        result.mimeType,
+      )
       setGeneratedSeed(result.seed)
-      setGeneratedProvider(result.provider)
+      setGeneratedProvider(
+        result.provider,
+      )
       setProgress(100)
       setStatus("success")
     } catch (generationError) {
       if (
         generationError instanceof Error &&
-        generationError.name === "AbortError"
+        generationError.name ===
+          "AbortError"
       ) {
         setStatus("idle")
         setProgress(0)
@@ -455,6 +576,7 @@ export function ImageGenerationDialog({
       }
 
       setStatus("error")
+
       setError(
         generationError instanceof Error
           ? generationError.message
@@ -503,9 +625,11 @@ export function ImageGenerationDialog({
 
       setSavedImageId(imageId)
       setStatus("success")
+
       onImageSaved?.(imageId)
     } catch (saveError) {
       setStatus("error")
+
       setError(
         saveError instanceof Error
           ? saveError.message
@@ -515,14 +639,11 @@ export function ImageGenerationDialog({
   }
 
   function rebuildPrompt() {
-    setPrompt(buildCharacterPrompt(character))
-    setGeneratedBlob(null)
-    setGeneratedSeed(undefined)
-    setGeneratedProvider(undefined)
-    setSavedImageId(null)
-    setStatus("idle")
-    setError("")
-    setProgress(0)
+    setPrompt(
+      buildCharacterPrompt(character),
+    )
+
+    clearGeneratedImage()
   }
 
   const generating =
@@ -535,7 +656,10 @@ export function ImageGenerationDialog({
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen && generating) {
+        if (
+          !nextOpen &&
+          generating
+        ) {
           controller?.abort()
         }
 
@@ -574,7 +698,7 @@ export function ImageGenerationDialog({
               </DialogTitle>
 
               <DialogDescription className="mt-1 text-xs">
-                Choose any installed local image AI.
+                Choose an installed local image AI.
               </DialogDescription>
             </div>
 
@@ -585,7 +709,9 @@ export function ImageGenerationDialog({
               onClick={() =>
                 onOpenChange(false)
               }
-              disabled={generating || saving}
+              disabled={
+                generating || saving
+              }
             >
               <X className="size-4" />
             </Button>
@@ -629,7 +755,8 @@ export function ImageGenerationDialog({
                       <img
                         src={previewUrl}
                         alt={`Generated portrait of ${
-                          character.name || "character"
+                          character.name ||
+                          "character"
                         }`}
                         className="
                           block max-h-[65vh]
@@ -751,7 +878,8 @@ export function ImageGenerationDialog({
                       </h3>
 
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Providers are discovered from mnemeona-image.
+                        Only installed models detected by the
+                        image service are shown.
                       </p>
                     </div>
 
@@ -759,83 +887,98 @@ export function ImageGenerationDialog({
                       variant="ghost"
                       size="icon"
                       className="size-8"
-                      onClick={refreshProviders}
+                      onClick={
+                        refreshProviders
+                      }
                       title="Refresh providers"
+                      disabled={
+                        generating ||
+                        saving
+                      }
                     >
                       <RefreshCw className="size-4" />
                     </Button>
                   </div>
 
                   <div className="grid gap-2">
-                    {providers.length === 0 ? (
+                    {providers.length ===
+                    0 ? (
                       <div className="rounded-lg border p-3 text-xs text-muted-foreground">
-                        No providers detected. Start the image service
+                        No installed image models detected.
+                        Start the image service, install a model,
                         and refresh.
                       </div>
                     ) : (
-                      providers.map((provider) => {
-                        const available =
-                          isProviderAvailable(
-                            provider,
-                          )
+                      providers.map(
+                        (provider) => {
+                          const recommendedSteps =
+                            getRecommendedSteps(
+                              provider.id,
+                            )
 
-                        const recommendedSteps =
-                          getRecommendedSteps(
-                            provider.id,
-                          )
-
-                        return (
-                          <button
-                            key={provider.id}
-                            type="button"
-                            disabled={!available}
-                            onClick={() =>
-                              selectProvider(
-                                provider.id,
-                              )
-                            }
-                            className={`
-                              rounded-xl border p-3 text-left
-                              transition
-                              ${
-                                config.provider ===
+                          return (
+                            <button
+                              key={
                                 provider.id
-                                  ? "border-primary bg-primary/5"
-                                  : "hover:bg-muted/50"
                               }
-                              ${
-                                !available
-                                  ? "cursor-not-allowed opacity-50"
-                                  : ""
+                              type="button"
+                              onClick={() =>
+                                selectProvider(
+                                  provider.id,
+                                )
                               }
-                            `}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-medium">
-                                  {provider.name}
+                              disabled={
+                                generating ||
+                                saving
+                              }
+                              className={`
+                                rounded-xl border p-3 text-left
+                                transition
+                                ${
+                                  config.provider ===
+                                  provider.id
+                                    ? "border-primary bg-primary/5"
+                                    : "hover:bg-muted/50"
+                                }
+                                ${
+                                  generating ||
+                                  saving
+                                    ? "cursor-not-allowed opacity-60"
+                                    : ""
+                                }
+                              `}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-medium">
+                                    {
+                                      provider.name
+                                    }
+                                  </div>
+
+                                  <div className="mt-1 text-[10px] text-muted-foreground">
+                                    {
+                                      provider.id
+                                    }
+
+                                    {provider.version
+                                      ? ` · v${provider.version}`
+                                      : ""}
+
+                                    {` · ${recommendedSteps} steps recommended`}
+                                  </div>
                                 </div>
 
-                                <div className="mt-1 text-[10px] text-muted-foreground">
-                                  {provider.id}
-
-                                  {provider.version
-                                    ? ` · v${provider.version}`
-                                    : ""}
-
-                                  {` · ${recommendedSteps} steps recommended`}
-                                </div>
+                                {provider.active && (
+                                  <span className="rounded-full bg-muted px-2 py-1 text-[10px]">
+                                    backend default
+                                  </span>
+                                )}
                               </div>
-
-                              {provider.active && (
-                                <span className="rounded-full bg-muted px-2 py-1 text-[10px]">
-                                  backend default
-                                </span>
-                              )}
-                            </div>
-                          </button>
-                        )
-                      })
+                            </button>
+                          )
+                        },
+                      )
                     )}
                   </div>
                 </div>
@@ -851,9 +994,12 @@ export function ImageGenerationDialog({
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={rebuildPrompt}
+                      onClick={
+                        rebuildPrompt
+                      }
                       disabled={
-                        generating || saving
+                        generating ||
+                        saving
                       }
                     >
                       Rebuild
@@ -863,9 +1009,14 @@ export function ImageGenerationDialog({
                   <textarea
                     value={prompt}
                     onChange={(event) =>
-                      setPrompt(event.target.value)
+                      setPrompt(
+                        event.target.value,
+                      )
                     }
-                    disabled={generating || saving}
+                    disabled={
+                      generating ||
+                      saving
+                    }
                     className="
                       min-h-44 w-full resize-y rounded-xl
                       border bg-background p-3 text-sm
@@ -893,10 +1044,18 @@ export function ImageGenerationDialog({
                         min={512}
                         max={1024}
                         value={width}
-                        onChange={(event) =>
+                        disabled={
+                          generating ||
+                          saving
+                        }
+                        onChange={(
+                          event,
+                        ) =>
                           setWidth(
                             Number(
-                              event.target.value,
+                              event
+                                .target
+                                .value,
                             ),
                           )
                         }
@@ -912,10 +1071,18 @@ export function ImageGenerationDialog({
                         min={512}
                         max={1024}
                         value={height}
-                        onChange={(event) =>
+                        disabled={
+                          generating ||
+                          saving
+                        }
+                        onChange={(
+                          event,
+                        ) =>
                           setHeight(
                             Number(
-                              event.target.value,
+                              event
+                                .target
+                                .value,
                             ),
                           )
                         }
@@ -931,10 +1098,18 @@ export function ImageGenerationDialog({
                         min={1}
                         max={50}
                         value={steps}
-                        onChange={(event) =>
+                        disabled={
+                          generating ||
+                          saving
+                        }
+                        onChange={(
+                          event,
+                        ) =>
                           setSteps(
                             Number(
-                              event.target.value,
+                              event
+                                .target
+                                .value,
                             ),
                           )
                         }
@@ -943,8 +1118,9 @@ export function ImageGenerationDialog({
                   </div>
 
                   <p className="mt-2 text-[10px] text-muted-foreground">
-                    Automatically set to the recommended value when
-                    changing models. You can still adjust it manually.
+                    Model recommendation is applied automatically
+                    when you select a model. You can still override
+                    it manually.
                   </p>
 
                   <Button
@@ -953,8 +1129,13 @@ export function ImageGenerationDialog({
                     className="mt-3"
                     onClick={() =>
                       setShowSettings(
-                        (current) => !current,
+                        (current) =>
+                          !current,
                       )
+                    }
+                    disabled={
+                      generating ||
+                      saving
                     }
                   >
                     {showSettings
@@ -972,14 +1153,24 @@ export function ImageGenerationDialog({
                           type="number"
                           step="0.5"
                           value={Number(
-                            config.settings
-                              .guidance_scale ?? 8,
+                            config
+                              .settings
+                              .guidance_scale ??
+                              8,
                           )}
-                          onChange={(event) =>
+                          disabled={
+                            generating ||
+                            saving
+                          }
+                          onChange={(
+                            event,
+                          ) =>
                             updateProviderSetting(
                               "guidance_scale",
                               Number(
-                                event.target.value,
+                                event
+                                  .target
+                                  .value,
                               ),
                             )
                           }
@@ -1010,7 +1201,9 @@ export function ImageGenerationDialog({
                 <div className="flex gap-2">
                   <Button
                     variant="outline"
-                    onClick={handleTestConnection}
+                    onClick={
+                      handleTestConnection
+                    }
                     disabled={
                       testing ||
                       generating ||
@@ -1028,12 +1221,15 @@ export function ImageGenerationDialog({
 
                   <Button
                     className="flex-1"
-                    onClick={handleGenerate}
+                    onClick={
+                      handleGenerate
+                    }
                     disabled={
                       generating ||
                       saving ||
                       !prompt.trim() ||
-                      providers.length === 0 ||
+                      providers.length ===
+                        0 ||
                       !providers.some(
                         (provider) =>
                           provider.id ===
@@ -1057,9 +1253,12 @@ export function ImageGenerationDialog({
                 {generatedBlob && (
                   <Button
                     className="w-full"
-                    onClick={handleSaveImage}
+                    onClick={
+                      handleSaveImage
+                    }
                     disabled={
-                      saving || !!savedImageId
+                      saving ||
+                      !!savedImageId
                     }
                   >
                     {saving ? (

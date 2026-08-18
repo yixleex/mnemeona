@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import gc
 import importlib
+import importlib.util
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,13 @@ from providers.base import ImageProvider
 class ProviderRegistry:
     """
     Manifest-driven image provider registry.
+
+    A provider is considered available only when:
+
+    1. Its manifest.json exists.
+    2. Its provider module exists.
+    3. For local-diffusers providers, the configured model_path
+       exists on disk.
 
     Mnemeona keeps provider instances lightweight while ensuring
     that at most ONE heavyweight image-generation pipeline is
@@ -33,11 +42,20 @@ class ProviderRegistry:
     ) -> None:
         self.config = config
 
-        self.providers_dir = (
+        #
+        # mnemeona-image/
+        #
+        self.project_dir = (
             Path(__file__)
             .resolve()
             .parents[1]
-            / "providers"
+        )
+
+        #
+        # mnemeona-image/providers/
+        #
+        self.providers_dir = (
+            self.project_dir / "providers"
         )
 
         self._manifests: dict[
@@ -66,7 +84,9 @@ class ProviderRegistry:
             self.active_id = configured_active
 
         else:
-            self.active_id = self._first_enabled_provider()
+            self.active_id = (
+                self._first_enabled_provider()
+            )
 
             if self.active_id is not None:
                 self.config[
@@ -78,9 +98,31 @@ class ProviderRegistry:
     # ------------------------------------------------------------------
 
     def _discover_manifests(self) -> None:
-        self._manifests.clear()
+        """
+        Discover provider manifests.
+
+        IMPORTANT:
+        A manifest by itself is NOT enough to make a provider
+        available.
+
+        For local-diffusers providers we also verify that the
+        configured model_path exists.
+
+        This means deleting:
+
+            models/DreamShaper_XL
+
+        automatically removes DreamShaper XL from the provider
+        list without requiring the user to manually disable it.
+        """
+
+        discovered: dict[
+            str,
+            dict[str, Any],
+        ] = {}
 
         if not self.providers_dir.exists():
+            self._manifests.clear()
             return
 
         for manifest_path in sorted(
@@ -120,6 +162,10 @@ class ProviderRegistry:
                     )
                     continue
 
+                provider_id = str(
+                    provider_id
+                )
+
                 manifest[
                     "_directory"
                 ] = str(
@@ -132,8 +178,62 @@ class ProviderRegistry:
                     manifest_path
                 )
 
-                self._manifests[
-                    str(provider_id)
+                #
+                # Make sure the provider module actually exists.
+                #
+
+                module_spec = manifest.get(
+                    "module"
+                )
+
+                if (
+                    module_spec
+                    and ":" in str(module_spec)
+                ):
+                    module_name = str(
+                        module_spec
+                    ).split(
+                        ":",
+                        1,
+                    )[0]
+
+                    provider_file = (
+                        manifest_path.parent
+                        / f"{module_name}.py"
+                    )
+
+                    if not provider_file.exists():
+                        print(
+                            "WARNING: Skipping provider "
+                            f"{provider_id}: provider module "
+                            f"does not exist: "
+                            f"{provider_file}"
+                        )
+                        continue
+
+                #
+                # IMPORTANT:
+                #
+                # Check whether the actual model exists.
+                #
+
+                model_available = (
+                    self._manifest_model_exists(
+                        manifest
+                    )
+                )
+
+                if not model_available:
+                    print(
+                        "Provider unavailable "
+                        f"(model missing): "
+                        f"{provider_id}"
+                    )
+
+                    continue
+
+                discovered[
+                    provider_id
                 ] = manifest
 
             except Exception as exc:
@@ -142,6 +242,264 @@ class ProviderRegistry:
                     f"manifest {manifest_path}: "
                     f"{exc}"
                 )
+
+        #
+        # If a provider disappeared since the previous discovery,
+        # remove its cached instance.
+        #
+
+        previous_ids = set(
+            self._manifests.keys()
+        )
+
+        discovered_ids = set(
+            discovered.keys()
+        )
+
+        removed_ids = (
+            previous_ids - discovered_ids
+        )
+
+        for provider_id in removed_ids:
+            #
+            # Do not allow a removed provider to remain loaded.
+            #
+
+            if (
+                self._loaded_provider_id
+                == provider_id
+            ):
+                try:
+                    self.unload(
+                        provider_id
+                    )
+                except Exception:
+                    self._loaded_provider_id = None
+
+            #
+            # Drop the lightweight provider instance too.
+            #
+
+            self._instances.pop(
+                provider_id,
+                None,
+            )
+
+        self._manifests = discovered
+
+        #
+        # Make sure active_id still points to an available provider.
+        #
+
+        if (
+            getattr(
+                self,
+                "active_id",
+                None,
+            )
+            not in self._manifests
+        ):
+            next_provider = (
+                self._first_enabled_provider()
+            )
+
+            self.active_id = next_provider
+
+            self.config[
+                "active_provider"
+            ] = next_provider or ""
+
+    def _manifest_model_exists(
+        self,
+        manifest: dict[str, Any],
+    ) -> bool:
+        """
+        Determine whether the actual model referenced by a
+        provider manifest exists.
+
+        For non-local providers we don't require a local model
+        directory.
+
+        For local-diffusers providers, model_path is required
+        and must exist.
+
+        Relative model paths are resolved against the
+        mnemeona-image project directory first.
+
+        Example:
+
+            models/DreamShaper_XL
+
+        becomes:
+
+            /home/yl/mnemeona/mnemeona-image/models/DreamShaper_XL
+        """
+
+        provider_type = str(
+            manifest.get(
+                "type",
+                "",
+            )
+        ).lower()
+
+        #
+        # Only local model providers need a filesystem model check.
+        #
+
+        if provider_type != "local-diffusers":
+            return True
+
+        model_path_value = (
+            manifest.get(
+                "model_path"
+            )
+        )
+
+        #
+        # Support a few alternative manifest layouts so provider
+        # manifests remain flexible.
+        #
+
+        if not model_path_value:
+            model_path_value = (
+                manifest.get(
+                    "model_dir"
+                )
+            )
+
+        if not model_path_value:
+            model_path_value = (
+                manifest.get(
+                    "path"
+                )
+            )
+
+        #
+        # Some manifests may define:
+        #
+        # "model": {
+        #     "path": "models/Foo"
+        # }
+        #
+
+        if not model_path_value:
+            model_value = manifest.get(
+                "model"
+            )
+
+            if isinstance(
+                model_value,
+                dict,
+            ):
+                model_path_value = (
+                    model_value.get(
+                        "path"
+                    )
+                    or model_value.get(
+                        "model_path"
+                    )
+                    or model_value.get(
+                        "directory"
+                    )
+                )
+
+        #
+        # A local-diffusers provider without a model path cannot
+        # be considered installed.
+        #
+
+        if not model_path_value:
+            print(
+                "WARNING: Local image provider "
+                f"{manifest.get('id', '<unknown>')} "
+                "does not define model_path."
+            )
+
+            return False
+
+        try:
+            model_path = Path(
+                str(
+                    model_path_value
+                )
+            ).expanduser()
+
+            #
+            # Absolute path:
+            #
+            # /home/yl/mnemeona/mnemeona-image/models/Foo
+            #
+
+            if model_path.is_absolute():
+                resolved_path = model_path
+
+            else:
+                #
+                # Normal project-relative path:
+                #
+                # models/Foo
+                #
+                project_relative = (
+                    self.project_dir
+                    / model_path
+                )
+
+                #
+                # Also support provider-relative paths as a fallback.
+                #
+
+                provider_relative = (
+                    Path(
+                        manifest[
+                            "_directory"
+                        ]
+                    )
+                    / model_path
+                )
+
+                if project_relative.exists():
+                    resolved_path = (
+                        project_relative
+                    )
+
+                else:
+                    resolved_path = (
+                        provider_relative
+                    )
+
+            exists = (
+                resolved_path.exists()
+            )
+
+            if not exists:
+                print(
+                    "Model not found for provider "
+                    f"{manifest.get('id', '<unknown>')}: "
+                    f"{resolved_path}"
+                )
+
+            return exists
+
+        except Exception as exc:
+            print(
+                "WARNING: Could not check model path "
+                f"for provider "
+                f"{manifest.get('id', '<unknown>')}: "
+                f"{exc}"
+            )
+
+            return False
+
+    def _refresh_discovery(self) -> None:
+        """
+        Re-scan manifests and model directories.
+
+        This is intentionally cheap because it only checks manifests,
+        provider modules, and filesystem paths. It does NOT load
+        image-generation pipelines.
+        """
+
+        self._discover_manifests()
 
     def _first_enabled_provider(
         self,
@@ -241,8 +599,6 @@ class ProviderRegistry:
             )
 
         #
-        # IMPORTANT:
-        #
         # Every provider gets a unique Python module name.
         #
         # We cannot simply import "provider" because LCM,
@@ -255,9 +611,6 @@ class ProviderRegistry:
             f"{provider_id.replace('-', '_')}"
         )
 
-        import importlib.util
-        import sys
-
         spec = (
             importlib.util.spec_from_file_location(
                 unique_module_name,
@@ -265,7 +618,10 @@ class ProviderRegistry:
             )
         )
 
-        if spec is None or spec.loader is None:
+        if (
+            spec is None
+            or spec.loader is None
+        ):
             raise RuntimeError(
                 f"Unable to create module spec "
                 f"for provider {provider_id}: "
@@ -280,9 +636,7 @@ class ProviderRegistry:
 
         #
         # Register the unique module name BEFORE
-        # executing the module. This is important for
-        # decorators, dataclasses and normal Python
-        # module semantics.
+        # executing the module.
         #
 
         sys.modules[
@@ -353,9 +707,16 @@ class ProviderRegistry:
         self,
         provider_id: str,
     ) -> ImageProvider:
+        #
+        # Re-check discovery before accessing a provider.
+        # This catches models deleted while the service is running.
+        #
+
+        self._refresh_discovery()
+
         if provider_id not in self._manifests:
             raise RuntimeError(
-                f"Unknown image provider: "
+                f"Unknown or unavailable image provider: "
                 f"{provider_id}"
             )
 
@@ -409,9 +770,11 @@ class ProviderRegistry:
         the new provider is loaded.
         """
 
+        self._refresh_discovery()
+
         if provider_id not in self._manifests:
             raise RuntimeError(
-                f"Unknown image provider: "
+                f"Unknown or unavailable image provider: "
                 f"{provider_id}"
             )
 
@@ -482,19 +845,16 @@ class ProviderRegistry:
         """
         Change the active provider.
 
-        IMPORTANT:
         Switching does NOT load the new model.
 
-        This means clicking between models in the UI doesn't
-        unnecessarily consume VRAM. The new model is loaded
-        on the first generation request.
-
-        The previous model is unloaded immediately.
+        The new model is loaded on the first generation request.
         """
+
+        self._refresh_discovery()
 
         if provider_id not in self._manifests:
             raise RuntimeError(
-                f"Unknown image provider: "
+                f"Unknown or unavailable image provider: "
                 f"{provider_id}"
             )
 
@@ -540,7 +900,7 @@ class ProviderRegistry:
         #
         # HARD VRAM BOUNDARY.
         #
-        # We unload BEFORE changing the active provider.
+        # Unload BEFORE changing the active provider.
         #
 
         self.unload_all()
@@ -660,10 +1020,6 @@ class ProviderRegistry:
         #
         # Also unload every other instantiated provider.
         #
-        # This is intentionally defensive. If a provider was
-        # loaded without updating registry state, we still
-        # release it.
-        #
 
         for provider_id, provider in list(
             self._instances.items()
@@ -709,9 +1065,11 @@ class ProviderRegistry:
         self,
         provider_id: str,
     ) -> dict[str, Any]:
+        self._refresh_discovery()
+
         if provider_id not in self._manifests:
             raise RuntimeError(
-                f"Unknown image provider: "
+                f"Unknown or unavailable image provider: "
                 f"{provider_id}"
             )
 
@@ -746,6 +1104,13 @@ class ProviderRegistry:
                     provider_id
                     == self._loaded_provider_id
                 ),
+                "model_exists": (
+                    self._manifest_model_exists(
+                        self._manifests[
+                            provider_id
+                        ]
+                    )
+                ),
             }
         )
 
@@ -755,6 +1120,8 @@ class ProviderRegistry:
         self,
         provider_id: str,
     ) -> dict[str, Any]:
+        self._refresh_discovery()
+
         provider = self.get(
             provider_id
         )
@@ -764,6 +1131,16 @@ class ProviderRegistry:
     def get_status(
         self,
     ) -> dict[str, Any]:
+        """
+        Return only providers that are actually available.
+
+        This performs a lightweight filesystem discovery on every
+        status request, so the frontend automatically stops showing
+        providers whose local model directory has been removed.
+        """
+
+        self._refresh_discovery()
+
         providers: list[
             dict[str, Any]
         ] = []
@@ -802,6 +1179,19 @@ class ProviderRegistry:
                     "loaded": False,
                 }
 
+            #
+            # Only providers whose actual model exists reach here.
+            #
+
+            model_exists = (
+                self._manifest_model_exists(
+                    manifest
+                )
+            )
+
+            if not model_exists:
+                continue
+
             providers.append(
                 {
                     "id": provider_id,
@@ -829,9 +1219,47 @@ class ProviderRegistry:
                         provider_id
                         == self._loaded_provider_id
                     ),
-                    "status": provider_status,
+                    "installed": True,
+                    "status": {
+                        **provider_status,
+                        "model_exists": True,
+                    },
                 }
             )
+
+        #
+        # If the active provider disappeared because its model was
+        # deleted, choose another available provider.
+        #
+
+        available_ids = {
+            provider["id"]
+            for provider in providers
+        }
+
+        if (
+            self.active_id
+            not in available_ids
+        ):
+            next_provider = (
+                self._first_enabled_provider()
+            )
+
+            self.active_id = next_provider
+
+            self.config[
+                "active_provider"
+            ] = next_provider or ""
+
+            #
+            # Recalculate active flags after changing active_id.
+            #
+
+            for provider in providers:
+                provider["active"] = (
+                    provider["id"]
+                    == self.active_id
+                )
 
         return {
             "active_provider": self.active_id,

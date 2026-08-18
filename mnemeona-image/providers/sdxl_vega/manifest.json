@@ -4,5 +4,6 @@
   "version": "1.0.0",
   "type": "local-diffusers",
   "module": "provider:SDXLVegaProvider",
-  "requirements": "requirements.txt"
+  "requirements": "requirements.txt",
+  "model_path": "models/Segmind-Vega"
 }
