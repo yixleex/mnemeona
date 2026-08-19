@@ -3,6 +3,7 @@ import type { Location } from "@/types/world/location"
 import type { WorldEvent } from "@/types/world/event"
 import type { Faction } from "@/types/world/faction"
 import type { Artifact } from "@/types/world/artifact"
+import type { Lore } from "@/types/world/lore"
 import type { Scene } from "@/types/manuscript"
 
 import type {
@@ -30,6 +31,10 @@ import {
   buildArtifactContext,
 } from "./world/artifact/artifactContext"
 
+import {
+  detectLoreMentions,
+} from "./world/lore/detectLoreMentions"
+
 /**
  * Builds the structured AI context for a scene.
  *
@@ -48,6 +53,7 @@ export function buildSceneContext(
   events: WorldEvent[],
   factions: Faction[] = [],
   artifacts: Artifact[] = [],
+  loreEntries: Lore[] = [],
 ): StoryContext {
   const characterContext =
     buildCharacterContext(
@@ -80,6 +86,67 @@ export function buildSceneContext(
       scene,
       artifacts,
     )
+
+  /*
+   * Lore is detected from the scene's searchable text.
+   *
+   * We intentionally include the same scene fields that
+   * are useful for the other worldbuilding detectors.
+   *
+   * This allows lore to be recognized when it appears in:
+   * - the manuscript text
+   * - synopsis
+   * - additional AI context
+   * - POV
+   * - location
+   * - time
+   */
+  const loreSearchText = [
+    scene.title,
+    scene.content,
+    scene.synopsis,
+    scene.aiAdditionalContext,
+    scene.pov,
+    scene.location,
+    scene.time,
+  ]
+    .filter(
+      (
+        value,
+      ): value is string =>
+        typeof value === "string" &&
+        value.trim().length > 0,
+    )
+    .join("\n")
+
+  const detectedLore =
+    detectLoreMentions(
+      loreSearchText,
+      loreEntries,
+    )
+
+  /*
+   * Only include lore entries that were actually
+   * detected in the scene.
+   *
+   * This keeps the AI context focused instead of
+   * sending the entire world's lore database.
+   */
+  const relevantLore =
+    detectedLore
+      .map((mention) =>
+        loreEntries.find(
+          (lore) =>
+            lore.id ===
+            mention.loreId,
+        ),
+      )
+      .filter(
+        (
+          lore,
+        ): lore is Lore =>
+          Boolean(lore),
+      )
 
   return {
     scene,
@@ -116,6 +183,11 @@ export function buildSceneContext(
 
     detectedArtifacts:
       artifactContext.detectedArtifacts,
+
+    lore:
+      relevantLore,
+
+    detectedLore,
   }
 }
 
@@ -288,6 +360,29 @@ export function formatStoryContext(
   }
 
   // --------------------------------------------------
+  // World Lore
+  // --------------------------------------------------
+
+  if (
+    context.lore.length > 0
+  ) {
+    const loreSections =
+      context.lore.map(
+        formatLore,
+      )
+
+    sections.push(
+      [
+        "## World Lore",
+        "",
+        loreSections.join(
+          "\n\n",
+        ),
+      ].join("\n"),
+    )
+  }
+
+  // --------------------------------------------------
   // Characters
   // --------------------------------------------------
 
@@ -401,6 +496,12 @@ export function formatStoryContext(
 
     detectedArtifactCount:
       context.detectedArtifacts.length,
+
+    loreCount:
+      context.lore.length,
+
+    detectedLoreCount:
+      context.detectedLore.length,
 
     estimatedTokens:
       estimateTokens(text),
@@ -826,22 +927,97 @@ function formatArtifact(
   return details.join("\n")
 }
 
-function addDetail(
-  sections: string[],
-  label: string,
-  value?: string,
-) {
-  if (!value?.trim()) {
-    return
+/**
+ * Formats an individual piece of world lore.
+ */
+function formatLore(
+  lore: Lore,
+): string {
+  const details: string[] = []
+
+  details.push(
+    `### ${lore.name}`,
+  )
+
+  if (
+    lore.aliases?.length > 0
+  ) {
+    details.push(
+      `Aliases: ${lore.aliases.join(", ")}`,
+    )
   }
 
-  sections.push(
-    `**${label}:**\n${value.trim()}`,
+  details.push(
+    `Type: ${lore.type}`,
   )
+
+  addDetail(
+    details,
+    "Description",
+    lore.description,
+  )
+
+  addDetail(
+    details,
+    "Origins",
+    lore.origins,
+  )
+
+  addDetail(
+    details,
+    "Beliefs",
+    lore.beliefs,
+  )
+
+  addDetail(
+    details,
+    "Significance",
+    lore.significance,
+  )
+
+  addDetail(
+    details,
+    "History",
+    lore.history,
+  )
+
+  addDetail(
+    details,
+    "Truth",
+    lore.truth,
+  )
+
+  addDetail(
+    details,
+    "Secrets",
+    lore.secrets,
+  )
+
+  return details.join("\n")
 }
 
 /**
- * Rough token estimation.
+ * Adds an optional text field to a formatted section.
+ */
+function addDetail(
+  details: string[],
+  label: string,
+  value?: string,
+): void {
+  if (
+    value?.trim()
+  ) {
+    details.push(
+      `${label}: ${value.trim()}`,
+    )
+  }
+}
+
+/**
+ * Very rough token estimation.
+ *
+ * This is intentionally approximate and is only
+ * used for displaying context size information.
  */
 function estimateTokens(
   text: string,
