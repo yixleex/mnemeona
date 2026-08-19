@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useProject } from "@/context/ProjectContext"
 
+import { FACTION_TYPES } from "@/types/world/factionTypes"
 import type { Character } from "@/types/character"
 import type {
   Faction,
@@ -26,26 +27,6 @@ import type { Location } from "@/types/world/location"
 interface FactionDatabaseProps {
   onClose?: () => void
 }
-
-const FACTION_TYPES: FactionType[] = [
-  "Kingdom",
-  "Empire",
-  "Nation",
-  "City-State",
-  "Guild",
-  "Company",
-  "House",
-  "Clan",
-  "Tribe",
-  "Religious Order",
-  "Military",
-  "Rebel Group",
-  "Criminal Organization",
-  "Secret Society",
-  "Political Movement",
-  "Academic Organization",
-  "Other",
-]
 
 function getFactionIcon(
   type: FactionType,
