@@ -7,6 +7,7 @@ import {
   Users,
   CalendarDays,
   StickyNote,
+  Flag,
 } from "lucide-react"
 
 import {
@@ -289,6 +290,7 @@ export function AIContextPanel({
       project.characters,
       project.locations,
       project.events,
+      project.factions ?? [],
     )
 
   const formatted =
@@ -742,7 +744,7 @@ export function AIContextPanel({
               <p className="mt-2 text-xs text-muted-foreground">
                 This context is saved directly to the scene. It is
                 included in the AI context and is also used for automatic
-                character, location, and world-event detection.
+                character, location, world-event, and faction detection.
               </p>
 
             </div>
@@ -1126,7 +1128,7 @@ export function AIContextPanel({
 
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
 
               <ContextStat
                 icon={StickyNote}
@@ -1157,6 +1159,14 @@ export function AIContextPanel({
                 label="World Events"
                 value={
                   formatted.eventCount
+                }
+              />
+
+              <ContextStat
+                icon={Flag}
+                label="Factions"
+                value={
+                  formatted.factionCount
                 }
               />
 
@@ -1192,7 +1202,7 @@ export function AIContextPanel({
 
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 
               <DetectionCard
                 icon={Users}
@@ -1215,6 +1225,14 @@ export function AIContextPanel({
                 label="World Event References"
                 value={
                   formatted.detectedEventCount
+                }
+              />
+
+              <DetectionCard
+                icon={Flag}
+                label="Faction References"
+                value={
+                  formatted.detectedFactionCount
                 }
               />
 
