@@ -6,7 +6,6 @@ import {
   Sparkles,
   Users,
   CalendarDays,
-  StickyNote,
   Flag,
 } from "lucide-react"
 
@@ -26,10 +25,6 @@ import {
   buildSceneContext,
   formatStoryContext,
 } from "@/components/ai/aicontext/buildSceneContext"
-
-import {
-  buildNotesContext,
-} from "@/components/ai/aicontext/buildNotesContext"
 
 import {
   loadContinueWritingLength,
@@ -188,6 +183,19 @@ export function AIContextPanel({
   )
 
   /*
+   * Story So Far is editable in this panel.
+   *
+   * Keep a local value so the textarea remains responsive while
+   * also persisting changes directly to the project.
+   */
+  const [
+    storySummaryDraft,
+    setStorySummaryDraft,
+  ] = useState(
+    project.storySummary ?? "",
+  )
+
+  /*
    * Additional Context comes directly from the
    * active Scene instead of localStorage.
    */
@@ -202,6 +210,19 @@ export function AIContextPanel({
       loadContinueWritingLength(),
     )
   }, [])
+
+  /*
+   * Keep the editable Story So Far synchronized if the project
+   * summary changes elsewhere in the application.
+   */
+  useEffect(() => {
+    setStorySummaryDraft(
+      project.storySummary ?? "",
+    )
+  }, [
+    project.storySummary,
+    activeScene?.id,
+  ])
 
   /*
    * The AI Context panel represents the base Continue AI
@@ -299,54 +320,23 @@ export function AIContextPanel({
     )
 
   // --------------------------------------------------
-  // Persistent Notes
-  // --------------------------------------------------
-
-  /*
-   * IMPORTANT:
-   *
-   * This uses the exact same builder that aiService.ts uses.
-   *
-   * Therefore the Notes shown here are the Notes that the
-   * AI actually receives.
-   */
-  const notesContext =
-    buildNotesContext(
-      project,
-    )
-
-  const enabledNotes =
-    project.notes.filter(
-      (note) =>
-        note.enabled &&
-        note.content.trim(),
-    )
-
-  // --------------------------------------------------
   // Story Summary
   // --------------------------------------------------
 
+  /*
+   * Use the editable local value for everything displayed in this
+   * panel. It is persisted to project.storySummary on every change.
+   */
   const storySummary =
-    project.storySummary?.trim() ?? ""
+    storySummaryDraft.trim()
 
   /*
    * Keep the structure aligned with buildAIContext().
    *
-   * Actual AI context:
-   *
-   * Persistent Story Notes
-   * Story So Far
-   * Current Story Context
+   * Persistent Story Notes are intentionally NOT displayed here.
+   * They remain part of the actual AI context through aiService.ts.
    */
   const contextSections: string[] = []
-
-  if (
-    notesContext.trim()
-  ) {
-    contextSections.push(
-      notesContext,
-    )
-  }
 
   if (
     storySummary
@@ -439,6 +429,29 @@ export function AIContextPanel({
         new Event(
           "mnemeona:continue-writing-length-changed",
         ),
+      )
+    }
+
+  const handleStorySummaryChange =
+    (
+      value: string,
+    ) => {
+      setStorySummaryDraft(
+        value,
+      )
+
+      /*
+       * Persist the author's correction immediately so the edited
+       * summary is also used by the AI.
+       */
+      updateProject(
+        (currentProject) => ({
+          ...currentProject,
+          storySummary:
+            value,
+          updatedAt:
+            new Date().toISOString(),
+        }),
       )
     }
 
@@ -550,70 +563,6 @@ export function AIContextPanel({
         <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
 
           {/* ================================================== */}
-          {/* Persistent Notes */}
-          {/* ================================================== */}
-
-          <section>
-
-            <div className="mb-4">
-
-              <div className="flex items-center gap-2">
-
-                <StickyNote className="h-4 w-4 text-primary" />
-
-                <h2 className="text-sm font-semibold">
-                  Persistent Story Notes
-                </h2>
-
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-                  {enabledNotes.length}
-                  {" "}
-                  active
-                </span>
-
-              </div>
-
-              <p className="mt-1 text-sm text-muted-foreground">
-                Author-controlled instructions, plot information,
-                character arcs, world rules, and other guidance that
-                remains available across scenes.
-              </p>
-
-            </div>
-
-            <div className="rounded-xl border bg-card p-5">
-
-              {notesContext.trim() ? (
-
-                <pre className="max-h-[500px] overflow-auto whitespace-pre-wrap rounded-lg bg-muted/30 p-4 font-mono text-xs leading-relaxed">
-                  {notesContext}
-                </pre>
-
-              ) : (
-
-                <div className="rounded-lg bg-muted/30 p-5 text-center">
-
-                  <StickyNote className="mx-auto mb-3 h-6 w-6 text-muted-foreground/50" />
-
-                  <p className="text-sm font-medium">
-                    No active persistent notes
-                  </p>
-
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Add notes from the Notes workspace to give the AI
-                    long-term author guidance.
-                  </p>
-
-                </div>
-
-              )}
-
-            </div>
-
-          </section>
-
-
-          {/* ================================================== */}
           {/* Continue AI Settings */}
           {/* ================================================== */}
 
@@ -695,6 +644,51 @@ export function AIContextPanel({
                 </span>
 
               </div>
+
+            </div>
+
+          </section>
+
+
+          {/* ================================================== */}
+          {/* Story So Far */}
+          {/* ================================================== */}
+
+          <section>
+
+            <div className="mb-4">
+
+              <h2 className="text-sm font-semibold">
+                Story So Far
+              </h2>
+
+              <p className="text-sm text-muted-foreground">
+                The persistent summary of what has actually happened
+                in the story. You can edit it to correct or clarify
+                anything the AI got wrong or missed.
+              </p>
+
+            </div>
+
+            <div className="rounded-xl border bg-card p-5">
+
+              <Textarea
+                id="story-summary"
+                value={storySummaryDraft}
+                onChange={(event) =>
+                  handleStorySummaryChange(
+                    event.target.value,
+                  )
+                }
+                placeholder="The story summary will appear here once it has been generated. You can also write or correct it yourself..."
+                className="min-h-[180px] resize-y leading-relaxed"
+                aria-label="Story So Far"
+              />
+
+              <p className="mt-2 text-xs text-muted-foreground">
+                Changes are saved automatically and will be used by the
+                AI as the persistent story summary.
+              </p>
 
             </div>
 
@@ -1048,10 +1042,10 @@ export function AIContextPanel({
                     </div>
 
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Includes persistent story notes, Story So Far,
-                      current story context, and the actual scene text.
-                      This is a local estimate; press Calculate tokens
-                      for the selected Ollama model's actual count.
+                      Includes Story So Far, current story context,
+                      and the actual scene text. Persistent notes are
+                      still included in the AI prompt but are managed
+                      separately in the Notes workspace.
                     </p>
 
                   </div>
@@ -1111,7 +1105,7 @@ export function AIContextPanel({
 
 
           {/* ================================================== */}
-          {/* Context Summary */}
+          {/* Context & Automatic Detection */}
           {/* ================================================== */}
 
           <section>
@@ -1119,24 +1113,17 @@ export function AIContextPanel({
             <div className="mb-4">
 
               <h2 className="text-sm font-semibold">
-                Context Summary
+                Context & Automatic Detection
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                What is currently available to the AI.
+                Everything the AI has identified and can currently use
+                from the project and this scene.
               </p>
 
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-
-              <ContextStat
-                icon={StickyNote}
-                label="Persistent Notes"
-                value={
-                  enabledNotes.length
-                }
-              />
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 
               <ContextStat
                 icon={Users}
@@ -1170,6 +1157,10 @@ export function AIContextPanel({
                 }
               />
 
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+
               <ContextStat
                 icon={MessageSquare}
                 label="Estimated Tokens"
@@ -1177,104 +1168,6 @@ export function AIContextPanel({
                   formattedEstimatedTokens
                 }
               />
-
-            </div>
-
-          </section>
-
-
-          {/* ================================================== */}
-          {/* Automatic Detection */}
-          {/* ================================================== */}
-
-          <section>
-
-            <div className="mb-4">
-
-              <h2 className="text-sm font-semibold">
-                Automatic Detection
-              </h2>
-
-              <p className="text-sm text-muted-foreground">
-                References discovered in the scene text and Additional
-                Context.
-              </p>
-
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-
-              <DetectionCard
-                icon={Users}
-                label="Character References"
-                value={
-                  formatted.detectedCharacterCount
-                }
-              />
-
-              <DetectionCard
-                icon={MapPin}
-                label="Location References"
-                value={
-                  formatted.detectedLocationCount
-                }
-              />
-
-              <DetectionCard
-                icon={CalendarDays}
-                label="World Event References"
-                value={
-                  formatted.detectedEventCount
-                }
-              />
-
-              <DetectionCard
-                icon={Flag}
-                label="Faction References"
-                value={
-                  formatted.detectedFactionCount
-                }
-              />
-
-            </div>
-
-          </section>
-
-
-          {/* ================================================== */}
-          {/* Story So Far */}
-          {/* ================================================== */}
-
-          <section>
-
-            <div className="mb-4">
-
-              <h2 className="text-sm font-semibold">
-                Story So Far
-              </h2>
-
-              <p className="text-sm text-muted-foreground">
-                The persistent summary of what has actually happened
-                in the story.
-              </p>
-
-            </div>
-
-            <div className="rounded-xl border bg-card p-5">
-
-              {storySummary ? (
-
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                  {storySummary}
-                </p>
-
-              ) : (
-
-                <p className="text-sm text-muted-foreground">
-                  No story summary has been generated yet.
-                </p>
-
-              )}
 
             </div>
 
@@ -1401,8 +1294,9 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  The persistent Notes, Story So Far, current story
-                  context, and scene prose available to the AI.
+                  Story So Far, current story context, and scene prose
+                  available to the AI. Persistent notes remain managed
+                  separately and are still supplied to the AI.
                 </p>
 
               </div>
@@ -1498,36 +1392,6 @@ function ContextStat({
         </div>
 
       </div>
-
-    </div>
-  )
-}
-
-function DetectionCard({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Users
-  label: string
-  value: number
-}) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-4">
-
-      <div className="flex items-center gap-3">
-
-        <Icon className="h-4 w-4 text-muted-foreground" />
-
-        <span className="text-sm">
-          {label}
-        </span>
-
-      </div>
-
-      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
-        {value}
-      </span>
 
     </div>
   )
