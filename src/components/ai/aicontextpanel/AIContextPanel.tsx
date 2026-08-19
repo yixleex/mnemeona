@@ -4,6 +4,7 @@ import {
   MapPin,
   MessageSquare,
   Package,
+  ScrollText,
   Sparkles,
   Users,
   CalendarDays,
@@ -267,6 +268,7 @@ export function AIContextPanel({
       project.events,
       project.factions ?? [],
       project.artifacts ?? [],
+      project.lore ?? [],
     )
 
   const formatted =
@@ -660,8 +662,8 @@ export function AIContextPanel({
               <p className="mt-2 text-xs text-muted-foreground">
                 This context is saved directly to the scene. It is
                 included in the AI context and is also used for automatic
-                character, location, world-event, faction, and artifact
-                detection.
+                character, location, world-event, faction, artifact,
+                and world lore detection.
               </p>
 
             </div>
@@ -955,9 +957,10 @@ export function AIContextPanel({
 
                     <p className="mt-2 text-xs text-muted-foreground">
                       Includes Story So Far, current story context,
-                      artifacts, and the actual scene text. Persistent
-                      notes are still included in the AI prompt but are
-                      managed separately in the Notes workspace.
+                      characters, locations, world events, factions,
+                      artifacts, world lore, and the actual scene text.
+                      Persistent notes are still included in the AI prompt
+                      but are managed separately in the Notes workspace.
                     </p>
 
                   </div>
@@ -1034,7 +1037,7 @@ export function AIContextPanel({
 
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
 
               <ContextStat
                 icon={Users}
@@ -1068,12 +1071,20 @@ export function AIContextPanel({
                 }
               />
 
-              {/* NEW: Artifacts */}
               <ContextStat
                 icon={Package}
                 label="Artifacts"
                 value={
                   formatted.artifactCount
+                }
+              />
+
+              {/* NEW: World Lore */}
+              <ContextStat
+                icon={ScrollText}
+                label="World Lore"
+                value={
+                  formatted.loreCount
                 }
               />
 
@@ -1213,8 +1224,9 @@ export function AIContextPanel({
 
                 <p className="text-sm text-muted-foreground">
                   Story So Far, current story context, detected world
-                  information, artifacts, and scene prose available to
-                  the AI. Persistent notes remain managed separately.
+                  information, artifacts, world lore, and scene prose
+                  available to the AI. Persistent notes remain managed
+                  separately.
                 </p>
 
               </div>

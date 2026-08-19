@@ -20,12 +20,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useProject } from "@/context/ProjectContext"
 
-import type { Faction } from "@/types/world/faction"
-
 import { EventDatabase } from "./events/EventDatabase"
 import { LocationDatabase } from "./locations/LocationDatabase"
 import { FactionDatabase } from "./factions/FactionDatabase"
 import { ArtifactDatabase } from "./artifacts/ArtifactDatabase"
+import { LoreDatabase } from "./lore/LoreDatabase"
 
 interface WorldDatabaseProps {
   onClose?: () => void
@@ -131,6 +130,9 @@ export function WorldDatabase({
   const artifactCount =
     project.artifacts?.length ?? 0
 
+  const loreCount =
+    project.lore?.length ?? 0
+
   const categoryCounts =
     useMemo(
       () => ({
@@ -138,7 +140,7 @@ export function WorldDatabase({
         events: eventCount,
         factions: factionCount,
         artifacts: artifactCount,
-        lore: 0,
+        lore: loreCount,
         cultures: 0,
         creatures: 0,
         systems: 0,
@@ -148,6 +150,7 @@ export function WorldDatabase({
         eventCount,
         factionCount,
         artifactCount,
+        loreCount,
       ],
     )
 
@@ -216,6 +219,16 @@ export function WorldDatabase({
   if (activeView === "artifacts") {
     return (
       <ArtifactDatabase
+        onClose={() =>
+          setActiveView("overview")
+        }
+      />
+    )
+  }
+
+  if (activeView === "lore") {
+    return (
+      <LoreDatabase
         onClose={() =>
           setActiveView("overview")
         }
@@ -336,7 +349,9 @@ export function WorldDatabase({
 
               <Button
                 variant="outline"
-                disabled
+                onClick={() =>
+                  setActiveView("lore")
+                }
               >
                 <Plus className="mr-2 h-4 w-4" />
                 New Lore
@@ -385,7 +400,9 @@ export function WorldDatabase({
                       category.id ===
                         "factions" ||
                       category.id ===
-                        "artifacts"
+                        "artifacts" ||
+                      category.id ===
+                        "lore"
 
                     const count =
                       categoryCounts[
@@ -433,6 +450,15 @@ export function WorldDatabase({
                           ) {
                             setActiveView(
                               "artifacts",
+                            )
+                          }
+
+                          if (
+                            category.id ===
+                            "lore"
+                          ) {
+                            setActiveView(
+                              "lore",
                             )
                           }
                         }}

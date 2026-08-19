@@ -1,160 +1,219 @@
-import type { Scene } from "./manuscript"
-import type { Character } from "./character"
-import type { Location } from "./world/location"
-import type { WorldEvent } from "./world/event"
-import type { Faction } from "./world/faction"
-import type { Artifact } from "./world/artifact"
+/**
+ * Types used by the AI context system.
+ *
+ * World Lore is treated as a first-class world entity alongside
+ * characters, locations, artifacts, etc.
+ */
 
-// --------------------------------------------------
-// Character Mentions
-// --------------------------------------------------
+export type AIContextEntityType =
+  | "character"
+  | "location"
+  | "artifact"
+  | "lore"
+  | "world-lore"
+  | "faction"
+  | "event"
+  | "other"
 
-export interface CharacterMention {
-  characterId: string
+export interface AIContextEntity {
+  id: string
+  type: AIContextEntityType
+  name: string
 
-  matchedText: string
+  /**
+   * Alternative names the AI should recognize as references
+   * to this entity.
+   */
+  aliases?: string[]
 
-  confidence: number
+  /**
+   * Human-readable content used when building AI context.
+   */
+  content?: string
 
-  source: "name" | "alias"
+  /**
+   * Optional relevance/search metadata.
+   */
+  description?: string
+
+  /**
+   * Additional data specific to the source entity.
+   */
+  metadata?: Record<string, unknown>
 }
 
-// --------------------------------------------------
-// Location Mentions
-// --------------------------------------------------
+/**
+ * A piece of world lore that can be supplied to the AI.
+ */
+export interface AIContextLore {
+  id: string
+  type: "lore" | "world-lore"
+  name: string
+  aliases?: string[]
 
-export interface LocationMention {
-  locationId: string
+  /**
+   * Main lore text.
+   */
+  content: string
 
-  matchedText: string
+  /**
+   * Optional short description/summary.
+   */
+  description?: string
 
-  confidence: number
+  /**
+   * Optional lore category, such as:
+   * - History
+   * - Religion
+   * - Magic
+   * - Culture
+   * - Politics
+   * - Geography
+   * - Mythology
+   * - Technology
+   * - Other
+   */
+  category?: string
 
-  source: "name" | "alias"
+  createdAt?: string
+  updatedAt?: string
+
+  metadata?: Record<string, unknown>
 }
 
-// --------------------------------------------------
-// World Event Mentions
-// --------------------------------------------------
+/**
+ * An artifact represented in AI context.
+ */
+export interface AIContextArtifact {
+  id: string
+  type: "artifact"
+  name: string
+  aliases?: string[]
 
-export interface WorldEventMention {
-  eventId: string
+  description?: string
+  artifactType?: string
 
-  matchedText: string
+  ownerCharacterId?: string
+  ownerName?: string
 
-  confidence: number
+  locationId?: string
+  locationName?: string
 
-  source: "name"
+  powers?: string
+  abilities?: string
+  appearance?: string
+  history?: string
+  significance?: string
+  secrets?: string
+
+  createdAt?: string
+  updatedAt?: string
+
+  metadata?: Record<string, unknown>
 }
 
-// --------------------------------------------------
-// Faction Mentions
-// --------------------------------------------------
+/**
+ * A character represented in AI context.
+ */
+export interface AIContextCharacter {
+  id: string
+  type: "character"
+  name: string
+  aliases?: string[]
 
-export interface FactionMention {
-  factionId: string
+  description?: string
 
-  matchedText: string
-
-  confidence: number
-
-  source:
-    | "name"
-    | "leader"
-    | "headquarters"
+  metadata?: Record<string, unknown>
 }
 
-// --------------------------------------------------
-// Artifact Mentions
-// --------------------------------------------------
+/**
+ * A location represented in AI context.
+ */
+export interface AIContextLocation {
+  id: string
+  type: "location"
+  name: string
+  aliases?: string[]
 
-export interface ArtifactMention {
-  artifactId: string
+  description?: string
 
-  matchedText: string
-
-  confidence: number
-
-  source: "name" | "alias"
+  metadata?: Record<string, unknown>
 }
 
-// --------------------------------------------------
-// Character Relationships
-// --------------------------------------------------
+/**
+ * Context source used by the AI context builder.
+ */
+export type AIContextItem =
+  | AIContextEntity
+  | AIContextCharacter
+  | AIContextLocation
+  | AIContextArtifact
+  | AIContextLore
 
-export interface StoryContextRelationship {
-  characterId: string
+/**
+ * Collection of world information available to the AI.
+ */
+export interface AIContext {
+  characters?: AIContextCharacter[]
+  locations?: AIContextLocation[]
+  artifacts?: AIContextArtifact[]
+  lore?: AIContextLore[]
 
-  relatedCharacterId: string
+  /**
+   * Generic entities allow future world database types
+   * to be included without changing this interface.
+   */
+  entities?: AIContextEntity[]
 
-  type: string
-
-  description: string
+  /**
+   * Optional assembled text representation.
+   */
+  text?: string
 }
 
-// --------------------------------------------------
-// Structured Story Context
-// --------------------------------------------------
+/**
+ * Options controlling how context is generated.
+ */
+export interface AIContextOptions {
+  includeCharacters?: boolean
+  includeLocations?: boolean
+  includeArtifacts?: boolean
+  includeLore?: boolean
+  includeWorldLore?: boolean
 
-export interface StoryContext {
-  scene: Scene
+  /**
+   * Maximum number of context entries to include.
+   */
+  maxItems?: number
 
-  // Characters
-  characters: Character[]
-
-  detectedCharacters: CharacterMention[]
-
-  relationships: StoryContextRelationship[]
-
-  // Locations
-  locations: Location[]
-
-  detectedLocations: LocationMention[]
-
-  // World Events
-  events: WorldEvent[]
-
-  detectedEvents: WorldEventMention[]
-
-  // Factions
-  factions: Faction[]
-
-  detectedFactions: FactionMention[]
-
-  // Artifacts
-  artifacts: Artifact[]
-
-  detectedArtifacts: ArtifactMention[]
+  /**
+   * Optional search/reference text used for relevance filtering.
+   */
+  query?: string
 }
 
-// --------------------------------------------------
-// Formatted Context
-// --------------------------------------------------
+/**
+ * A generic reference discovered in user/story text.
+ *
+ * This is particularly useful for aliases:
+ *
+ *   Artifact: "The Crown of Ashes"
+ *   Alias: "Ash Crown"
+ *
+ * A mention of "Ash Crown" can resolve back to the artifact.
+ */
+export interface AIContextReference {
+  id: string
+  type: AIContextEntityType
+  name: string
+  matchedText?: string
+  matchedAlias?: string
+  score?: number
+}
 
-export interface FormattedStoryContext {
-  text: string
-
-  characterCount: number
-
-  detectedCharacterCount: number
-
-  relationshipCount: number
-
-  locationCount: number
-
-  detectedLocationCount: number
-
-  eventCount: number
-
-  detectedEventCount: number
-
-  factionCount: number
-
-  detectedFactionCount: number
-
-  artifactCount: number
-
-  detectedArtifactCount: number
-
-  estimatedTokens: number
+/**
+ * Result of resolving references in text.
+ */
+export interface AIContextReferenceResult {
+  references: AIContextReference[]
 }
