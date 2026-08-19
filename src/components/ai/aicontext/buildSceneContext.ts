@@ -2,6 +2,7 @@ import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
 import type { WorldEvent } from "@/types/world/event"
 import type { Faction } from "@/types/world/faction"
+import type { Artifact } from "@/types/world/artifact"
 import type { Scene } from "@/types/manuscript"
 
 import type {
@@ -25,6 +26,10 @@ import {
   buildFactionContext,
 } from "./world/faction/factionContext"
 
+import {
+  buildArtifactContext,
+} from "./world/artifact/artifactContext"
+
 /**
  * Builds the structured AI context for a scene.
  *
@@ -35,9 +40,6 @@ import {
  *
  * Persistent project notes are deliberately NOT
  * handled here.
- * They are project-level context rather than
- * scene/world entities and are added by
- * buildAIContext().
  */
 export function buildSceneContext(
   scene: Scene,
@@ -45,6 +47,7 @@ export function buildSceneContext(
   locations: Location[],
   events: WorldEvent[],
   factions: Faction[] = [],
+  artifacts: Artifact[] = [],
 ): StoryContext {
   const characterContext =
     buildCharacterContext(
@@ -70,6 +73,12 @@ export function buildSceneContext(
       factions,
       characters,
       locations,
+    )
+
+  const artifactContext =
+    buildArtifactContext(
+      scene,
+      artifacts,
     )
 
   return {
@@ -101,6 +110,12 @@ export function buildSceneContext(
 
     detectedFactions:
       factionContext.detectedFactions,
+
+    artifacts:
+      artifactContext.artifacts,
+
+    detectedArtifacts:
+      artifactContext.detectedArtifacts,
   }
 }
 
@@ -108,10 +123,7 @@ export function buildSceneContext(
  * Converts structured story context into
  * text suitable for an AI prompt.
  *
- * Detection results are intentionally NOT
- * dumped into the prompt as raw metadata.
- *
- * Instead, detected entities determine which
+ * Detection results determine which
  * worldbuilding records become relevant.
  */
 export function formatStoryContext(
@@ -249,6 +261,33 @@ export function formatStoryContext(
   }
 
   // --------------------------------------------------
+  // Artifacts
+  // --------------------------------------------------
+
+  if (
+    context.artifacts.length > 0
+  ) {
+    const artifactSections =
+      context.artifacts.map(
+        (artifact) =>
+          formatArtifact(
+            artifact,
+            context,
+          ),
+      )
+
+    sections.push(
+      [
+        "## Artifacts",
+        "",
+        artifactSections.join(
+          "\n\n",
+        ),
+      ].join("\n"),
+    )
+  }
+
+  // --------------------------------------------------
   // Characters
   // --------------------------------------------------
 
@@ -356,6 +395,12 @@ export function formatStoryContext(
 
     detectedFactionCount:
       context.detectedFactions.length,
+
+    artifactCount:
+      context.artifacts.length,
+
+    detectedArtifactCount:
+      context.detectedArtifacts.length,
 
     estimatedTokens:
       estimateTokens(text),
@@ -574,10 +619,6 @@ function formatWorldEvent(
 
 /**
  * Formats an individual faction.
- *
- * Leader and headquarters are resolved
- * through their IDs so the AI sees their
- * current names rather than raw UUIDs.
  */
 function formatFaction(
   faction: Faction,
@@ -673,6 +714,113 @@ function formatFaction(
     details,
     "Secrets",
     faction.secrets,
+  )
+
+  return details.join("\n")
+}
+
+/**
+ * Formats an individual artifact.
+ *
+ * Aliases are deliberately included so the AI understands
+ * that multiple names refer to the same object.
+ */
+function formatArtifact(
+  artifact: Artifact,
+  context: StoryContext,
+): string {
+  const details: string[] = []
+
+  details.push(
+    `### ${artifact.name}`,
+  )
+
+  if (
+    artifact.aliases?.length > 0
+  ) {
+    details.push(
+      `Aliases: ${artifact.aliases.join(", ")}`,
+    )
+  }
+
+  details.push(
+    `Type: ${artifact.type}`,
+  )
+
+  addDetail(
+    details,
+    "Description",
+    artifact.description,
+  )
+
+  if (
+    artifact.ownerCharacterId
+  ) {
+    const owner =
+      context.characters.find(
+        (character) =>
+          character.id ===
+          artifact.ownerCharacterId,
+      )
+
+    if (owner) {
+      details.push(
+        `Current Owner: ${owner.name}`,
+      )
+    }
+  }
+
+  if (
+    artifact.locationId
+  ) {
+    const location =
+      context.locations.find(
+        (location) =>
+          location.id ===
+          artifact.locationId,
+      )
+
+    if (location) {
+      details.push(
+        `Location: ${location.name}`,
+      )
+    }
+  }
+
+  addDetail(
+    details,
+    "Powers",
+    artifact.powers,
+  )
+
+  addDetail(
+    details,
+    "Abilities",
+    artifact.abilities,
+  )
+
+  addDetail(
+    details,
+    "Appearance",
+    artifact.appearance,
+  )
+
+  addDetail(
+    details,
+    "History",
+    artifact.history,
+  )
+
+  addDetail(
+    details,
+    "Significance",
+    artifact.significance,
+  )
+
+  addDetail(
+    details,
+    "Secrets",
+    artifact.secrets,
   )
 
   return details.join("\n")

@@ -110,6 +110,7 @@ export function createProject(
     locations: [],
     events: [],
     factions: [],
+    artifacts: [],
 
     notes: [],
 
@@ -247,6 +248,10 @@ export async function openProject(): Promise<
 
                 factions:
                   parsed.factions ??
+                  [],
+
+                artifacts:
+                  parsed.artifacts ??
                   [],
 
                 notes:

@@ -312,6 +312,7 @@ export function AIContextPanel({
       project.locations,
       project.events,
       project.factions ?? [],
+      project.artifacts ?? [],
     )
 
   const formatted =

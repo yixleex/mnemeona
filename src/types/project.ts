@@ -1,49 +1,162 @@
-import type { Manuscript } from "./manuscript"
+import type { Scene } from "./manuscript"
 import type { Character } from "./character"
 import type { Location } from "./world/location"
 import type { WorldEvent } from "./world/event"
 import type { Faction } from "./world/faction"
-import type { StoryNote } from "./notes"
+import type { Artifact } from "./world/artifact"
 
-export interface MnemeonaProject {
-  id: string
+// --------------------------------------------------
+// Character Mentions
+// --------------------------------------------------
 
-  title: string
-  author?: string
+export interface CharacterMention {
+  characterId: string
 
-  createdAt: string
-  updatedAt: string
+  matchedText: string
 
-  manuscript: Manuscript
+  confidence: number
 
+  source: "name" | "alias"
+}
+
+// --------------------------------------------------
+// Location Mentions
+// --------------------------------------------------
+
+export interface LocationMention {
+  locationId: string
+
+  matchedText: string
+
+  confidence: number
+
+  source: "name" | "alias"
+}
+
+// --------------------------------------------------
+// World Event Mentions
+// --------------------------------------------------
+
+export interface WorldEventMention {
+  eventId: string
+
+  matchedText: string
+
+  confidence: number
+
+  source: "name"
+}
+
+// --------------------------------------------------
+// Faction Mentions
+// --------------------------------------------------
+
+export interface FactionMention {
+  factionId: string
+
+  matchedText: string
+
+  confidence: number
+
+  source:
+    | "name"
+    | "leader"
+    | "headquarters"
+}
+
+// --------------------------------------------------
+// Artifact Mentions
+// --------------------------------------------------
+
+export interface ArtifactMention {
+  artifactId: string
+
+  matchedText: string
+
+  confidence: number
+
+  source:
+    | "name"
+    | "alias"
+}
+
+// --------------------------------------------------
+// Character Relationships
+// --------------------------------------------------
+
+export interface StoryContextRelationship {
+  characterId: string
+
+  relatedCharacterId: string
+
+  type: string
+
+  description: string
+}
+
+// --------------------------------------------------
+// Structured Story Context
+// --------------------------------------------------
+
+export interface StoryContext {
+  scene: Scene
+
+  // Characters
   characters: Character[]
 
-  // World
+  detectedCharacters: CharacterMention[]
+
+  relationships: StoryContextRelationship[]
+
+  // Locations
   locations: Location[]
+
+  detectedLocations: LocationMention[]
+
+  // World Events
   events: WorldEvent[]
+
+  detectedEvents: WorldEventMention[]
+
+  // Factions
   factions: Faction[]
 
-  /**
-   * Persistent author-controlled notes.
-   *
-   * These are different from storySummary:
-   *
-   * - notes = author intent, canon, planning and persistent guidance
-   * - storySummary = AI-generated summary of what has actually happened
-   */
-  notes: StoryNote[]
+  detectedFactions: FactionMention[]
 
-  /**
-   * Persistent AI-generated summary of the story so far.
-   *
-   * This contains established events from previous scenes
-   * and gives the AI continuity without sending the entire
-   * manuscript every time.
-   */
-  storySummary: string
-  storySummaryFingerprint: string
+  // Artifacts
+  artifacts: Artifact[]
 
-  settings: {
-    activeSceneId: string | null
-  }
+  detectedArtifacts: ArtifactMention[]
+}
+
+// --------------------------------------------------
+// Formatted Context
+// --------------------------------------------------
+
+export interface FormattedStoryContext {
+  text: string
+
+  characterCount: number
+
+  detectedCharacterCount: number
+
+  relationshipCount: number
+
+  locationCount: number
+
+  detectedLocationCount: number
+
+  eventCount: number
+
+  detectedEventCount: number
+
+  factionCount: number
+
+  detectedFactionCount: number
+
+  artifactCount: number
+
+  detectedArtifactCount: number
+
+  estimatedTokens: number
 }

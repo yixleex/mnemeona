@@ -204,6 +204,8 @@ export function buildAIContext(
       project.characters,
       project.locations,
       project.events,
+      project.factions ?? [],
+      project.artifacts ?? [],
     )
 
   const formattedContext =

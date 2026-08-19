@@ -29,6 +29,7 @@ import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
 import type { WorldEvent } from "@/types/world/event"
 import type { Faction } from "@/types/world/faction"
+import type { Artifact } from "@/types/world/artifact"
 
 import { createProject } from "@/lib/project"
 
@@ -63,6 +64,9 @@ function normalizeProject(
 
     factions:
       project.factions ?? [],
+
+    artifacts:
+        project.artifacts ?? [],
 
     notes:
       project.notes ?? [],

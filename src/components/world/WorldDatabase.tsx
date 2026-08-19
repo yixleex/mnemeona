@@ -14,7 +14,6 @@ import {
   Users,
   WandSparkles,
   PawPrint,
-  Flag,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -26,6 +25,7 @@ import type { Faction } from "@/types/world/faction"
 import { EventDatabase } from "./events/EventDatabase"
 import { LocationDatabase } from "./locations/LocationDatabase"
 import { FactionDatabase } from "./factions/FactionDatabase"
+import { ArtifactDatabase } from "./artifacts/ArtifactDatabase"
 
 interface WorldDatabaseProps {
   onClose?: () => void
@@ -126,11 +126,10 @@ export function WorldDatabase({
     project.events?.length ?? 0
 
   const factionCount =
-    (
-      project as typeof project & {
-        factions?: Faction[]
-      }
-    ).factions?.length ?? 0
+    project.factions?.length ?? 0
+
+  const artifactCount =
+    project.artifacts?.length ?? 0
 
   const categoryCounts =
     useMemo(
@@ -138,7 +137,7 @@ export function WorldDatabase({
         locations: locationCount,
         events: eventCount,
         factions: factionCount,
-        artifacts: 0,
+        artifacts: artifactCount,
         lore: 0,
         cultures: 0,
         creatures: 0,
@@ -148,6 +147,7 @@ export function WorldDatabase({
         locationCount,
         eventCount,
         factionCount,
+        artifactCount,
       ],
     )
 
@@ -206,6 +206,16 @@ export function WorldDatabase({
   if (activeView === "factions") {
     return (
       <FactionDatabase
+        onClose={() =>
+          setActiveView("overview")
+        }
+      />
+    )
+  }
+
+  if (activeView === "artifacts") {
+    return (
+      <ArtifactDatabase
         onClose={() =>
           setActiveView("overview")
         }
@@ -314,6 +324,18 @@ export function WorldDatabase({
 
               <Button
                 variant="outline"
+                onClick={() =>
+                  setActiveView(
+                    "artifacts",
+                  )
+                }
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                New Artifact
+              </Button>
+
+              <Button
+                variant="outline"
                 disabled
               >
                 <Plus className="mr-2 h-4 w-4" />
@@ -330,8 +352,8 @@ export function WorldDatabase({
 
               <p className="text-sm text-muted-foreground">
                 Organize the people, places,
-                history, and systems that make
-                your world unique.
+                history, objects, and systems
+                that make your world unique.
               </p>
             </div>
 
@@ -361,7 +383,9 @@ export function WorldDatabase({
                       category.id ===
                         "events" ||
                       category.id ===
-                        "factions"
+                        "factions" ||
+                      category.id ===
+                        "artifacts"
 
                     const count =
                       categoryCounts[
@@ -400,6 +424,15 @@ export function WorldDatabase({
                           ) {
                             setActiveView(
                               "factions",
+                            )
+                          }
+
+                          if (
+                            category.id ===
+                            "artifacts"
+                          ) {
+                            setActiveView(
+                              "artifacts",
                             )
                           }
                         }}
