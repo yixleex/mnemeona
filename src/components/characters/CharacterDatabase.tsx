@@ -30,6 +30,10 @@ import {
   CharacterImageDialog,
 } from "@/components/characters/CharacterImageDialog"
 
+import {
+  CharacterImprovementPanel,
+} from "@/components/characters/CharacterImprovementPanel"
+
 import type {
   Character,
 } from "@/types/character"
@@ -86,6 +90,11 @@ export function CharacterDatabase({
   ] = useState(false)
 
   const [
+    improvementPanelOpen,
+    setImprovementPanelOpen,
+  ] = useState(false)
+
+  const [
     characterImages,
     setCharacterImages,
   ] = useState<Map<string, MnemeonaImage>>(
@@ -123,6 +132,18 @@ export function CharacterDatabase({
       (character) =>
         character.id === selectedId,
     ) ?? null
+
+  /*
+   * If the selected character changes while
+   * the improvement panel is open, close it.
+   *
+   * This prevents the panel from accidentally
+   * continuing to edit a character that is no
+   * longer selected.
+   */
+  useEffect(() => {
+    setImprovementPanelOpen(false)
+  }, [selectedId])
 
   useEffect(() => {
     let cancelled = false
@@ -270,6 +291,8 @@ export function CharacterDatabase({
           character.id !== deletedId,
       )
 
+    setImprovementPanelOpen(false)
+
     deleteCharacter(deletedId)
 
     setSelectedId(
@@ -291,6 +314,14 @@ export function CharacterDatabase({
     }
 
     setCharacterImageDialogOpen(true)
+  }
+
+  function handleOpenCharacterImprovement() {
+    if (!selectedCharacter) {
+      return
+    }
+
+    setImprovementPanelOpen(true)
   }
 
   function handleImageSaved(
@@ -798,6 +829,9 @@ export function CharacterDatabase({
               onChangeImage={
                 handleOpenCharacterImages
               }
+              onImproveCharacter={
+                handleOpenCharacterImprovement
+              }
             />
           ) : (
             <div
@@ -907,6 +941,33 @@ export function CharacterDatabase({
           }}
         />
       )}
+
+      {/*
+       * IMPORTANT:
+       *
+       * The improvement panel is conditionally
+       * mounted. When onClose() calls
+       * setImprovementPanelOpen(false), this
+       * component is actually removed from the DOM.
+       *
+       * Previously the panel was always mounted
+       * and received an unused "open" prop, so
+       * clicking X changed the state but nothing
+       * visually disappeared.
+       */}
+      {selectedCharacter &&
+        improvementPanelOpen && (
+          <CharacterImprovementPanel
+            character={
+              selectedCharacter
+            }
+            onClose={() =>
+              setImprovementPanelOpen(
+                false,
+              )
+            }
+          />
+        )}
     </div>
   )
 }
@@ -931,6 +992,8 @@ interface CharacterEditorProps {
   onGenerateImage: () => void
 
   onChangeImage: () => void
+
+  onImproveCharacter: () => void
 }
 
 function CharacterEditor({
@@ -942,6 +1005,7 @@ function CharacterEditor({
   onContextToggle,
   onGenerateImage,
   onChangeImage,
+  onImproveCharacter,
 }: CharacterEditorProps) {
   function addAlias(
     value: string,
@@ -1114,6 +1178,22 @@ function CharacterEditor({
               gap-2
             "
           >
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={
+                onImproveCharacter
+              }
+            >
+              <Sparkles
+                className="
+                  mr-2
+                  size-4
+                "
+              />
+              Improve with AI
+            </Button>
+
             <Button
               variant="outline"
               size="sm"
@@ -1374,7 +1454,6 @@ function CharacterEditor({
         />
       </CharacterSection>
 
-      {/* Long-form character backstory */}
       <CharacterSection
         title="Background"
         description="History, upbringing, formative experiences, relationships, important past events, and anything else that shaped who this character is."
