@@ -2,6 +2,7 @@ import type { Scene } from "./manuscript"
 import type { Character } from "./character"
 import type { Location } from "./world/location"
 import type { WorldEvent } from "./world/event"
+import type { Faction } from "./world/faction"
 
 // --------------------------------------------------
 // Character Mentions
@@ -46,6 +47,23 @@ export interface WorldEventMention {
 }
 
 // --------------------------------------------------
+// Faction Mentions
+// --------------------------------------------------
+
+export interface FactionMention {
+  factionId: string
+
+  matchedText: string
+
+  confidence: number
+
+  source:
+    | "name"
+    | "leader"
+    | "headquarters"
+}
+
+// --------------------------------------------------
 // Character Relationships
 // --------------------------------------------------
 
@@ -82,6 +100,11 @@ export interface StoryContext {
   events: WorldEvent[]
 
   detectedEvents: WorldEventMention[]
+
+  // Factions
+  factions: Faction[]
+
+  detectedFactions: FactionMention[]
 }
 
 // --------------------------------------------------
@@ -104,6 +127,10 @@ export interface FormattedStoryContext {
   eventCount: number
 
   detectedEventCount: number
+
+  factionCount: number
+
+  detectedFactionCount: number
 
   estimatedTokens: number
 }

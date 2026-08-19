@@ -1,0 +1,9 @@
+{
+  "id": "sdxl_lightning",
+  "name": "SDXL-Lightning 4-Step",
+  "version": "1.0.0",
+  "type": "local-diffusers",
+  "module": "provider:SDXLLightningProvider",
+  "requirements": "requirements.txt",
+  "model_path": "models/SDXL-Lightning"
+}

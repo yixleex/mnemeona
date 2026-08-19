@@ -1,6 +1,7 @@
 import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
 import type { WorldEvent } from "@/types/world/event"
+import type { Faction } from "@/types/world/faction"
 import type { Scene } from "@/types/manuscript"
 
 import type {
@@ -20,6 +21,10 @@ import {
   buildWorldEventContext,
 } from "./world/event/worldEventContext"
 
+import {
+  buildFactionContext,
+} from "./world/faction/factionContext"
+
 /**
  * Builds the structured AI context for a scene.
  *
@@ -28,15 +33,18 @@ import {
  *
  * This function acts as the orchestrator.
  *
- * Persistent project notes are deliberately NOT handled here.
- * They are project-level context rather than scene/world entities
- * and are added by buildAIContext().
+ * Persistent project notes are deliberately NOT
+ * handled here.
+ * They are project-level context rather than
+ * scene/world entities and are added by
+ * buildAIContext().
  */
 export function buildSceneContext(
   scene: Scene,
   characters: Character[],
   locations: Location[],
   events: WorldEvent[],
+  factions: Faction[] = [],
 ): StoryContext {
   const characterContext =
     buildCharacterContext(
@@ -54,6 +62,14 @@ export function buildSceneContext(
     buildWorldEventContext(
       scene,
       events,
+    )
+
+  const factionContext =
+    buildFactionContext(
+      scene,
+      factions,
+      characters,
+      locations,
     )
 
   return {
@@ -79,6 +95,12 @@ export function buildSceneContext(
 
     detectedEvents:
       eventContext.detectedEvents,
+
+    factions:
+      factionContext.factions,
+
+    detectedFactions:
+      factionContext.detectedFactions,
   }
 }
 
@@ -200,6 +222,33 @@ export function formatStoryContext(
   }
 
   // --------------------------------------------------
+  // Factions
+  // --------------------------------------------------
+
+  if (
+    context.factions.length > 0
+  ) {
+    const factionSections =
+      context.factions.map(
+        (faction) =>
+          formatFaction(
+            faction,
+            context,
+          ),
+      )
+
+    sections.push(
+      [
+        "## Factions",
+        "",
+        factionSections.join(
+          "\n\n",
+        ),
+      ].join("\n"),
+    )
+  }
+
+  // --------------------------------------------------
   // Characters
   // --------------------------------------------------
 
@@ -301,6 +350,12 @@ export function formatStoryContext(
 
     detectedEventCount:
       context.detectedEvents.length,
+
+    factionCount:
+      context.factions.length,
+
+    detectedFactionCount:
+      context.detectedFactions.length,
 
     estimatedTokens:
       estimateTokens(text),
@@ -512,6 +567,112 @@ function formatWorldEvent(
     details,
     "Secrets",
     event.secrets,
+  )
+
+  return details.join("\n")
+}
+
+/**
+ * Formats an individual faction.
+ *
+ * Leader and headquarters are resolved
+ * through their IDs so the AI sees their
+ * current names rather than raw UUIDs.
+ */
+function formatFaction(
+  faction: Faction,
+  context: StoryContext,
+): string {
+  const details: string[] = []
+
+  details.push(
+    `### ${faction.name}`,
+  )
+
+  details.push(
+    `Type: ${faction.type}`,
+  )
+
+  addDetail(
+    details,
+    "Description",
+    faction.description,
+  )
+
+  if (
+    faction.leaderCharacterId
+  ) {
+    const leader =
+      context.characters.find(
+        (character) =>
+          character.id ===
+          faction.leaderCharacterId,
+      )
+
+    if (leader) {
+      details.push(
+        `Leader: ${leader.name}`,
+      )
+    }
+  }
+
+  if (
+    faction.headquartersLocationId
+  ) {
+    const headquarters =
+      context.locations.find(
+        (location) =>
+          location.id ===
+          faction.headquartersLocationId,
+      )
+
+    if (headquarters) {
+      details.push(
+        `Headquarters: ${headquarters.name}`,
+      )
+    }
+  }
+
+  addDetail(
+    details,
+    "Goals",
+    faction.goals,
+  )
+
+  addDetail(
+    details,
+    "Values",
+    faction.values,
+  )
+
+  addDetail(
+    details,
+    "Resources",
+    faction.resources,
+  )
+
+  addDetail(
+    details,
+    "Allies",
+    faction.allies,
+  )
+
+  addDetail(
+    details,
+    "Enemies",
+    faction.enemies,
+  )
+
+  addDetail(
+    details,
+    "History",
+    faction.history,
+  )
+
+  addDetail(
+    details,
+    "Secrets",
+    faction.secrets,
   )
 
   return details.join("\n")

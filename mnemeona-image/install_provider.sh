@@ -403,6 +403,91 @@ PY
         echo "  ${MODEL_DIR}"
         ;;
 
+    sdxl_lightning)
+        MODEL_DIR="${MODELS_DIR}/SDXL-Lightning"
+        MODEL_REPO="ByteDance/SDXL-Lightning"
+
+        echo
+        echo "=========================================="
+        echo " Installing SDXL-Lightning 4-Step"
+        echo "=========================================="
+        echo
+        echo "Hugging Face repository:"
+        echo "  ${MODEL_REPO}"
+        echo
+        echo "Local installation directory:"
+        echo "  ${MODEL_DIR}"
+        echo
+        echo "License:"
+        echo "  CreativeML Open RAIL++-M"
+        echo
+        echo "This provider uses the 4-step UNet"
+        echo "checkpoint with the official SDXL base."
+        echo
+        echo "The Lightning checkpoint is about 5 GB."
+        echo "The SDXL base model will also be cached"
+        echo "by Diffusers on first use."
+        echo
+
+        mkdir -p "${MODEL_DIR}"
+
+        python -m pip install \
+            "huggingface_hub>=0.32"
+
+        CHECKPOINT="${MODEL_DIR}/sdxl_lightning_4step_unet.safetensors"
+
+        if [ -f "${CHECKPOINT}" ]; then
+            echo "SDXL-Lightning 4-step checkpoint already exists."
+            echo
+            echo "Skipping download."
+            echo
+        else
+            echo "Downloading SDXL-Lightning 4-step UNet..."
+            echo
+            echo "This is a large download and may take some time."
+            echo
+
+            python - <<PY
+from pathlib import Path
+
+from huggingface_hub import hf_hub_download
+
+model_dir = Path(
+    r"""${MODEL_DIR}"""
+)
+
+model_dir.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+downloaded = hf_hub_download(
+    repo_id="${MODEL_REPO}",
+    filename="sdxl_lightning_4step_unet.safetensors",
+    local_dir=str(model_dir),
+)
+
+print()
+print("SDXL-Lightning checkpoint download complete.")
+print(f"Model location: {downloaded}")
+PY
+        fi
+
+        if [ ! -f "${CHECKPOINT}" ]; then
+            echo
+            echo "ERROR: SDXL-Lightning installation appears incomplete."
+            echo
+            echo "Expected:"
+            echo "  ${CHECKPOINT}"
+            echo
+            exit 1
+        fi
+
+        echo
+        echo "SDXL-Lightning model verified:"
+        echo "  ${MODEL_DIR}"
+        ;;
+
 
     *)
         echo

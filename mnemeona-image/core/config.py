@@ -139,14 +139,44 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "use_cpu_offload": True,
             },
         },
+
+        "sdxl_lightning": {
+            "enabled": True,
+
+            "model_path": (
+                "./models/SDXL-Lightning"
+            ),
+
+            "device": "auto",
+            "dtype": "float16",
+
+            "settings": {
+                "steps": 4,
+                "guidance_scale": 0.0,
+
+                "negative_prompt": "",
+
+                "attention_slicing": True,
+                "vae_slicing": True,
+                "vae_tiling": True,
+
+                "use_cpu_offload": True,
+
+                "max_width": 1024,
+                "max_height": 1024,
+            },
+        },
     },
 
     "gpu_coordination": {
         "enabled": True,
+
         "ollama_url": (
             "http://127.0.0.1:11434"
         ),
+
         "reload_after_image": True,
+
         "timeout_seconds": 10,
     },
 }
@@ -273,7 +303,24 @@ def load_config() -> dict[str, Any]:
         ).setdefault(
             "animagine_xl",
             {},
-        )["model_path"] = animagine_xl_model
+        )["model_path"] = (
+            animagine_xl_model
+        )
+
+    sdxl_lightning_model = os.getenv(
+        "MNEMEONA_SDXL_LIGHTNING_MODEL"
+    )
+
+    if sdxl_lightning_model:
+        config.setdefault(
+            "providers",
+            {},
+        ).setdefault(
+            "sdxl_lightning",
+            {},
+        )["model_path"] = (
+            sdxl_lightning_model
+        )
 
     return config
 
