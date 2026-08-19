@@ -3,6 +3,7 @@ import type { Character } from "./character"
 import type { Location } from "./world/location"
 import type { WorldEvent } from "./world/event"
 import type { Faction } from "./world/faction"
+import type { Artifact } from "./world/artifact"
 
 // --------------------------------------------------
 // Character Mentions
@@ -64,6 +65,20 @@ export interface FactionMention {
 }
 
 // --------------------------------------------------
+// Artifact Mentions
+// --------------------------------------------------
+
+export interface ArtifactMention {
+  artifactId: string
+
+  matchedText: string
+
+  confidence: number
+
+  source: "name" | "alias"
+}
+
+// --------------------------------------------------
 // Character Relationships
 // --------------------------------------------------
 
@@ -105,6 +120,11 @@ export interface StoryContext {
   factions: Faction[]
 
   detectedFactions: FactionMention[]
+
+  // Artifacts
+  artifacts: Artifact[]
+
+  detectedArtifacts: ArtifactMention[]
 }
 
 // --------------------------------------------------
@@ -131,6 +151,10 @@ export interface FormattedStoryContext {
   factionCount: number
 
   detectedFactionCount: number
+
+  artifactCount: number
+
+  detectedArtifactCount: number
 
   estimatedTokens: number
 }
