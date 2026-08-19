@@ -3,6 +3,7 @@ import {
   Eye,
   MapPin,
   MessageSquare,
+  Package,
   Sparkles,
   Users,
   CalendarDays,
@@ -44,11 +45,6 @@ interface AIContextPanelProps {
 // Local Gemma 3 Estimate
 // --------------------------------------------------
 
-/**
- * Extracts the actual prose from the current scene.
- *
- * This is intentionally local-only. It never contacts Ollama.
- */
 function extractSceneText(
   scene: {
     content?: unknown
@@ -112,12 +108,6 @@ function extractSceneText(
   ).trim()
 }
 
-/**
- * Local-only Gemma 3 token estimate.
- *
- * This is only an approximation. The actual model count is obtained
- * when the user explicitly presses "Calculate tokens".
- */
 function estimateTokens(
   text: string,
 ): number {
@@ -141,12 +131,6 @@ interface EstimatedPromptParts {
   sceneText: string
 }
 
-/**
- * Builds the local-only text used for the displayed estimate.
- *
- * The actual scene text is deliberately included because it is
- * part of the prompt sent to the model.
- */
 function buildEstimatedPromptText({
   formattedContext,
   sceneText,
@@ -182,12 +166,6 @@ export function AIContextPanel({
     loadContinueWritingLength(),
   )
 
-  /*
-   * Story So Far is editable in this panel.
-   *
-   * Keep a local value so the textarea remains responsive while
-   * also persisting changes directly to the project.
-   */
   const [
     storySummaryDraft,
     setStorySummaryDraft,
@@ -195,26 +173,15 @@ export function AIContextPanel({
     project.storySummary ?? "",
   )
 
-  /*
-   * Additional Context comes directly from the
-   * active Scene instead of localStorage.
-   */
   const sceneAIContext =
     activeScene?.aiAdditionalContext ?? ""
 
-  /*
-   * Load the saved Continue AI token budget.
-   */
   useEffect(() => {
     setContinueWritingLength(
       loadContinueWritingLength(),
     )
   }, [])
 
-  /*
-   * Keep the editable Story So Far synchronized if the project
-   * summary changes elsewhere in the application.
-   */
   useEffect(() => {
     setStorySummaryDraft(
       project.storySummary ?? "",
@@ -224,19 +191,9 @@ export function AIContextPanel({
     activeScene?.id,
   ])
 
-  /*
-   * The AI Context panel represents the base Continue AI
-   * prompt context, so there are no extra chat messages.
-   */
   const messages:
     | undefined = undefined
 
-  /*
-   * Token counting.
-   *
-   * The request is only sent when calculateTokenCount()
-   * is explicitly called.
-   */
   const {
     tokenCount,
     isCalculating,
@@ -250,9 +207,6 @@ export function AIContextPanel({
     messages,
   })
 
-  /*
-   * Tell App whenever token calculation starts or finishes.
-   */
   useEffect(() => {
     onTokenCalculationChange?.(
       isCalculating,
@@ -324,19 +278,9 @@ export function AIContextPanel({
   // Story Summary
   // --------------------------------------------------
 
-  /*
-   * Use the editable local value for everything displayed in this
-   * panel. It is persisted to project.storySummary on every change.
-   */
   const storySummary =
     storySummaryDraft.trim()
 
-  /*
-   * Keep the structure aligned with buildAIContext().
-   *
-   * Persistent Story Notes are intentionally NOT displayed here.
-   * They remain part of the actual AI context through aiService.ts.
-   */
   const contextSections: string[] = []
 
   if (
@@ -381,10 +325,6 @@ export function AIContextPanel({
       activeScene,
     )
 
-  /*
-   * The displayed formatted context and actual scene prose
-   * are both included in the token estimate.
-   */
   const estimatedPromptText =
     buildEstimatedPromptText({
       formattedContext:
@@ -441,10 +381,6 @@ export function AIContextPanel({
         value,
       )
 
-      /*
-       * Persist the author's correction immediately so the edited
-       * summary is also used by the AI.
-       */
       updateProject(
         (currentProject) => ({
           ...currentProject,
@@ -460,9 +396,6 @@ export function AIContextPanel({
     (
       value: string,
     ) => {
-      /*
-       * Persist Additional Context directly to the scene.
-       */
       updateProject(
         (currentProject) => ({
           ...currentProject,
@@ -487,7 +420,6 @@ export function AIContextPanel({
                               activeScene.id
                                 ? {
                                     ...scene,
-
                                     aiAdditionalContext:
                                       value,
                                   }
@@ -518,17 +450,14 @@ export function AIContextPanel({
       {/* ================================================== */}
 
       <div className="border-b px-6 py-5">
-
         <div className="flex items-start justify-between gap-4">
 
           <div className="flex items-start gap-3">
-
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
               <Sparkles className="h-5 w-5 text-primary" />
             </div>
 
             <div>
-
               <h1 className="text-xl font-semibold tracking-tight">
                 AI Context
               </h1>
@@ -536,9 +465,7 @@ export function AIContextPanel({
               <p className="mt-1 text-sm text-muted-foreground">
                 Everything currently available to the AI for this scene.
               </p>
-
             </div>
-
           </div>
 
           {onClose && (
@@ -552,7 +479,6 @@ export function AIContextPanel({
           )}
 
         </div>
-
       </div>
 
       {/* ================================================== */}
@@ -568,7 +494,6 @@ export function AIContextPanel({
           {/* ================================================== */}
 
           <section>
-
             <div className="rounded-xl border bg-card p-5">
 
               <div className="mb-5">
@@ -583,8 +508,7 @@ export function AIContextPanel({
                   </Label>
 
                   <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
-                    {continueWritingLength.toLocaleString()}
-                    {" "}
+                    {continueWritingLength.toLocaleString()}{" "}
                     tokens
                   </span>
 
@@ -647,9 +571,7 @@ export function AIContextPanel({
               </div>
 
             </div>
-
           </section>
-
 
           {/* ================================================== */}
           {/* Story So Far */}
@@ -695,7 +617,6 @@ export function AIContextPanel({
 
           </section>
 
-
           {/* ================================================== */}
           {/* Scene-specific context */}
           {/* ================================================== */}
@@ -739,13 +660,13 @@ export function AIContextPanel({
               <p className="mt-2 text-xs text-muted-foreground">
                 This context is saved directly to the scene. It is
                 included in the AI context and is also used for automatic
-                character, location, world-event, and faction detection.
+                character, location, world-event, faction, and artifact
+                detection.
               </p>
 
             </div>
 
           </section>
-
 
           {/* ================================================== */}
           {/* Prompt Context / Token Count */}
@@ -788,9 +709,7 @@ export function AIContextPanel({
 
                           {tokenCount.contextLength
                             ? ` / ${tokenCount.contextLength.toLocaleString()}`
-                            : ""}
-
-                          {" "}
+                            : ""}{" "}
                           tokens
 
                         </p>
@@ -921,21 +840,16 @@ export function AIContextPanel({
                       </p>
 
                       <p className="mt-1 font-medium">
-
                         {isApproximate
                           ? "≈ "
                           : ""}
-
                         {tokenCount.promptTokens.toLocaleString()}
-
                       </p>
 
                       {isApproximate && (
-
                         <p className="mt-1 text-[11px] text-amber-600">
                           Approximate
                         </p>
-
                       )}
 
                     </div>
@@ -998,11 +912,9 @@ export function AIContextPanel({
                   <div className="flex items-center justify-between gap-4">
 
                     <div>
-
                       <p className="text-sm font-medium">
                         Model token count has not been requested
                       </p>
-
                     </div>
 
                     <Button
@@ -1035,8 +947,7 @@ export function AIContextPanel({
 
                       <span className="font-medium">
                         ≈{" "}
-                        {formattedEstimatedTokens.toLocaleString()}
-                        {" "}
+                        {formattedEstimatedTokens.toLocaleString()}{" "}
                         tokens
                       </span>
 
@@ -1044,9 +955,9 @@ export function AIContextPanel({
 
                     <p className="mt-2 text-xs text-muted-foreground">
                       Includes Story So Far, current story context,
-                      and the actual scene text. Persistent notes are
-                      still included in the AI prompt but are managed
-                      separately in the Notes workspace.
+                      artifacts, and the actual scene text. Persistent
+                      notes are still included in the AI prompt but are
+                      managed separately in the Notes workspace.
                     </p>
 
                   </div>
@@ -1104,7 +1015,6 @@ export function AIContextPanel({
 
           </section>
 
-
           {/* ================================================== */}
           {/* Context & Automatic Detection */}
           {/* ================================================== */}
@@ -1124,7 +1034,7 @@ export function AIContextPanel({
 
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
 
               <ContextStat
                 icon={Users}
@@ -1158,6 +1068,15 @@ export function AIContextPanel({
                 }
               />
 
+              {/* NEW: Artifacts */}
+              <ContextStat
+                icon={Package}
+                label="Artifacts"
+                value={
+                  formatted.artifactCount
+                }
+              />
+
             </div>
 
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -1173,7 +1092,6 @@ export function AIContextPanel({
             </div>
 
           </section>
-
 
           {/* ================================================== */}
           {/* Current Scene */}
@@ -1279,7 +1197,6 @@ export function AIContextPanel({
 
           </section>
 
-
           {/* ================================================== */}
           {/* Formatted AI Context */}
           {/* ================================================== */}
@@ -1295,9 +1212,9 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  Story So Far, current story context, and scene prose
-                  available to the AI. Persistent notes remain managed
-                  separately and are still supplied to the AI.
+                  Story So Far, current story context, detected world
+                  information, artifacts, and scene prose available to
+                  the AI. Persistent notes remain managed separately.
                 </p>
 
               </div>
@@ -1307,8 +1224,7 @@ export function AIContextPanel({
                 <Eye className="h-4 w-4" />
 
                 ≈{" "}
-                {formattedEstimatedTokens.toLocaleString()}
-                {" "}
+                {formattedEstimatedTokens.toLocaleString()}{" "}
                 tokens
 
               </div>
@@ -1354,7 +1270,6 @@ export function AIContextPanel({
     </div>
   )
 }
-
 
 // --------------------------------------------------
 // Components

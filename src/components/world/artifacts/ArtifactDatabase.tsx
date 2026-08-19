@@ -60,9 +60,21 @@ function ArtifactEditor({
       artifact?.name ?? "",
     )
 
-  const [aliases, setAliases] =
-    useState<string[]>(
-      artifact?.aliases ?? [],
+  /*
+   * Keep aliases as a string while editing.
+   *
+   * This is important because converting the input
+   * to an array on every keystroke prevents normal
+   * typing, including spaces.
+   *
+   * Aliases are converted to string[] only when
+   * the artifact is saved.
+   */
+  const [aliasesText, setAliasesText] =
+    useState(
+      (artifact?.aliases ?? []).join(
+        ", ",
+      ),
     )
 
   const [type, setType] =
@@ -131,18 +143,29 @@ function ArtifactEditor({
       new Date().toISOString()
 
     /*
-     * Clean aliases before saving:
-     * - trim whitespace
-     * - remove empty aliases
-     * - remove duplicates case-insensitively
-     * - don't save the artifact's canonical name as an alias
+     * Convert the aliases input into an array
+     * only when saving.
+     *
+     * Rules:
+     * - Separate aliases with commas
+     * - Trim whitespace around aliases
+     * - Remove empty aliases
+     * - Remove duplicate aliases
+     * - Comparison is case-insensitive
+     * - Don't save the canonical artifact name
+     *   as an alias
      */
     const cleanedAliases: string[] = []
 
     const seenAliases =
       new Set<string>()
 
-    for (const alias of aliases) {
+    const normalizedName =
+      trimmedName.toLocaleLowerCase()
+
+    for (const alias of aliasesText.split(
+      ",",
+    )) {
       const trimmedAlias =
         alias.trim()
 
@@ -152,9 +175,6 @@ function ArtifactEditor({
 
       const normalizedAlias =
         trimmedAlias.toLocaleLowerCase()
-
-      const normalizedName =
-        trimmedName.toLocaleLowerCase()
 
       if (
         normalizedAlias ===
@@ -237,25 +257,20 @@ function ArtifactEditor({
     })
   }
 
-  const aliasesText =
-    aliases.join(", ")
-
-  const handleAliasesChange = (
-    value: string,
-  ) => {
-    const parsedAliases =
-      value
-        .split(",")
-        .map(
-          (alias) =>
-            alias.trim(),
-        )
-        .filter(Boolean)
-
-    setAliases(
-      parsedAliases,
-    )
-  }
+  /*
+   * Preview the aliases underneath the input.
+   *
+   * This does NOT modify aliasesText, so the user
+   * can freely type spaces while editing.
+   */
+  const aliasPreview =
+    aliasesText
+      .split(",")
+      .map(
+        (alias) =>
+          alias.trim(),
+      )
+      .filter(Boolean)
 
   return (
     <form
@@ -320,7 +335,7 @@ function ArtifactEditor({
         <Input
           value={aliasesText}
           onChange={(event) =>
-            handleAliasesChange(
+            setAliasesText(
               event.target.value,
             )
           }
@@ -335,9 +350,9 @@ function ArtifactEditor({
           references to this artifact.
         </p>
 
-        {aliases.length > 0 && (
+        {aliasPreview.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pt-1">
-            {aliases.map(
+            {aliasPreview.map(
               (alias, index) => (
                 <span
                   key={`${alias}-${index}`}
@@ -1174,7 +1189,7 @@ export function ArtifactDatabase({
                                   location
                                 }
                               </span>
-                            </div>
+                              </div>
                           )}
                         </div>
                       )}
