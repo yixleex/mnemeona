@@ -2,6 +2,7 @@ import type { Manuscript } from "./manuscript"
 import type { Character } from "./character"
 import type { Location } from "./world/location"
 import type { WorldEvent } from "./world/event"
+import type { Faction } from "./world/faction"
 import type { StoryNote } from "./notes"
 
 export interface MnemeonaProject {
@@ -20,6 +21,7 @@ export interface MnemeonaProject {
   // World
   locations: Location[]
   events: WorldEvent[]
+  factions: Faction[]
 
   /**
    * Persistent author-controlled notes.

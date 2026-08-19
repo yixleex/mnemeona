@@ -28,6 +28,7 @@ import type { MnemeonaProject } from "@/types/project"
 import type { Character } from "@/types/character"
 import type { Location } from "@/types/world/location"
 import type { WorldEvent } from "@/types/world/event"
+import type { Faction } from "@/types/world/faction"
 
 import { createProject } from "@/lib/project"
 
@@ -59,6 +60,9 @@ function normalizeProject(
 
     events:
       project.events ?? [],
+
+    factions:
+      project.factions ?? [],
 
     notes:
       project.notes ?? [],

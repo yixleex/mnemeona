@@ -14,14 +14,18 @@ import {
   Users,
   WandSparkles,
   PawPrint,
+  Flag,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useProject } from "@/context/ProjectContext"
 
+import type { Faction } from "@/types/world/faction"
+
 import { EventDatabase } from "./events/EventDatabase"
 import { LocationDatabase } from "./locations/LocationDatabase"
+import { FactionDatabase } from "./factions/FactionDatabase"
 
 interface WorldDatabaseProps {
   onClose?: () => void
@@ -115,22 +119,25 @@ export function WorldDatabase({
   const [searchQuery, setSearchQuery] =
     useState("")
 
-  // --------------------------------------------------
-  // World Counts
-  // --------------------------------------------------
-
   const locationCount =
     project.locations?.length ?? 0
 
   const eventCount =
     project.events?.length ?? 0
 
+  const factionCount =
+    (
+      project as typeof project & {
+        factions?: Faction[]
+      }
+    ).factions?.length ?? 0
+
   const categoryCounts =
     useMemo(
       () => ({
         locations: locationCount,
         events: eventCount,
-        factions: 0,
+        factions: factionCount,
         artifacts: 0,
         lore: 0,
         cultures: 0,
@@ -140,6 +147,7 @@ export function WorldDatabase({
       [
         locationCount,
         eventCount,
+        factionCount,
       ],
     )
 
@@ -175,52 +183,38 @@ export function WorldDatabase({
       0,
     )
 
-  // --------------------------------------------------
-  // Location View
-  // --------------------------------------------------
-
-  if (
-    activeView ===
-    "locations"
-  ) {
+  if (activeView === "locations") {
     return (
       <LocationDatabase
         onClose={() =>
-          setActiveView(
-            "overview",
-          )
+          setActiveView("overview")
         }
       />
     )
   }
 
-  // --------------------------------------------------
-  // Event View
-  // --------------------------------------------------
-
-  if (
-    activeView ===
-    "events"
-  ) {
+  if (activeView === "events") {
     return (
       <EventDatabase
         onClose={() =>
-          setActiveView(
-            "overview",
-          )
+          setActiveView("overview")
         }
       />
     )
   }
 
-  // --------------------------------------------------
-  // World Overview
-  // --------------------------------------------------
+  if (activeView === "factions") {
+    return (
+      <FactionDatabase
+        onClose={() =>
+          setActiveView("overview")
+        }
+      />
+    )
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Header */}
-
       <div className="border-b px-6 py-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -256,8 +250,6 @@ export function WorldDatabase({
           )}
         </div>
 
-        {/* Search */}
-
         <div className="relative mt-5 max-w-xl">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 
@@ -274,12 +266,8 @@ export function WorldDatabase({
         </div>
       </div>
 
-      {/* Content */}
-
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl space-y-8 p-6">
-          {/* Quick Actions */}
-
           <section>
             <div className="mb-4">
               <h2 className="text-sm font-semibold">
@@ -305,9 +293,7 @@ export function WorldDatabase({
 
               <Button
                 onClick={() =>
-                  setActiveView(
-                    "events",
-                  )
+                  setActiveView("events")
                 }
               >
                 <Plus className="mr-2 h-4 w-4" />
@@ -316,7 +302,11 @@ export function WorldDatabase({
 
               <Button
                 variant="outline"
-                disabled
+                onClick={() =>
+                  setActiveView(
+                    "factions",
+                  )
+                }
               >
                 <Plus className="mr-2 h-4 w-4" />
                 New Faction
@@ -331,8 +321,6 @@ export function WorldDatabase({
               </Button>
             </div>
           </section>
-
-          {/* Categories */}
 
           <section>
             <div className="mb-4">
@@ -371,7 +359,9 @@ export function WorldDatabase({
                       category.id ===
                         "locations" ||
                       category.id ===
-                        "events"
+                        "events" ||
+                      category.id ===
+                        "factions"
 
                     const count =
                       categoryCounts[
@@ -380,9 +370,7 @@ export function WorldDatabase({
 
                     return (
                       <button
-                        key={
-                          category.id
-                        }
+                        key={category.id}
                         type="button"
                         disabled={
                           !isAvailable
@@ -403,6 +391,15 @@ export function WorldDatabase({
                           ) {
                             setActiveView(
                               "events",
+                            )
+                          }
+
+                          if (
+                            category.id ===
+                            "factions"
+                          ) {
+                            setActiveView(
+                              "factions",
                             )
                           }
                         }}
@@ -452,8 +449,6 @@ export function WorldDatabase({
               </div>
             )}
           </section>
-
-          {/* AI Context */}
 
           <section>
             <div className="rounded-xl border bg-muted/30 p-5">

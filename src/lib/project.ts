@@ -109,6 +109,7 @@ export function createProject(
 
     locations: [],
     events: [],
+    factions: [],
 
     notes: [],
 
@@ -180,6 +181,9 @@ export function downloadProject(
 /**
  * Open one individual .mnemeona.json project.
  *
+ * Older project files are automatically migrated
+ * by providing missing world collections as empty arrays.
+ *
  * The imported project is also placed into IndexedDB and
  * becomes the active local project.
  */
@@ -239,6 +243,10 @@ export async function openProject(): Promise<
 
                 events:
                   parsed.events ??
+                  [],
+
+                factions:
+                  parsed.factions ??
                   [],
 
                 notes:
