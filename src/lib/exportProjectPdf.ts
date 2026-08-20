@@ -961,149 +961,45 @@ export async function exportProjectToPdf(
     buildProjectHtml(project)
 
   /*
-   * Tauri 2 does not use normal browser popups for
-   * application windows. Instead, create a real Tauri
-   * WebviewWindow.
+   * Tauri 2 detection.
    *
-   * We dynamically import this so the normal web/browser
-   * version of Mnemeona does not require Tauri at runtime.
+   * __TAURI_INTERNALS__ is injected by Tauri and is not
+   * present when Mnemeona is running in a normal browser.
    */
   const isTauri =
     typeof window !== "undefined" &&
     "__TAURI_INTERNALS__" in window
 
-  if (isTauri) {
-    const {
-      WebviewWindow,
-    } = await import(
-      "@tauri-apps/api/webviewWindow"
-    )
-
-    const label =
-      `project-pdf-${Date.now()}`
-
+  if (!isTauri) {
     /*
-     * Load the current application page first.
-     *
-     * We then replace its DOM with the generated
-     * print document using WebviewWindow.eval().
-     *
-     * This avoids data: URLs, popup blockers and
-     * browser security restrictions.
+     * Browser fallback.
      */
-    const pdfWindow =
-      new WebviewWindow(
-        label,
-        {
-          title:
-            `${project.title} — PDF Export`,
-          width: 1000,
-          height: 800,
-          center: true,
-          resizable: true,
-          decorations: true,
-          url:
-            window.location.href,
-        },
+    const printWindow =
+      window.open(
+        "",
+        "_blank",
+        "width=1000,height=800",
       )
 
-    const printDocument =
-      JSON.stringify(html)
+    if (!printWindow) {
+      throw new Error(
+        "The PDF export window was blocked by the browser. Please allow pop-ups for Mnemeona.",
+      )
+    }
 
-    await new Promise<void>(
-      (
-        resolve,
-        reject,
-      ) => {
-        let settled =
-          false
+    printWindow.document.open()
+    printWindow.document.write(
+      html,
+    )
+    printWindow.document.close()
 
-        const cleanup =
-          () => {
-            if (settled) {
-              return
-            }
-
-            settled = true
-          }
-
-        pdfWindow.once(
-          "tauri://error",
-          (event) => {
-            cleanup()
-
-            reject(
-              new Error(
-                `Could not create PDF window: ${JSON.stringify(
-                  event,
-                )}`,
-              ),
-            )
-          },
-        )
-
-        pdfWindow.once(
-          "tauri://created",
-          async () => {
-            try {
-              /*
-               * Give the WebView a moment to finish loading
-               * the application page before replacing its DOM.
-               */
-              await new Promise(
-                (resolveDelay) =>
-                  setTimeout(
-                    resolveDelay,
-                    500,
-                  ),
-              )
-
-              /*
-               * JSON.stringify() above makes this safe to
-               * inject as JavaScript.
-               */
-              const script = `
-                (() => {
-                  const html = ${printDocument};
-
-                  document.open();
-                  document.write(html);
-                  document.close();
-                })();
-              `
-
-              await pdfWindow.eval(
-                script,
-              )
-
-              /*
-               * Wait for the generated HTML and its fonts
-               * to be laid out before printing.
-               */
-              await new Promise(
-                (resolveDelay) =>
-                  setTimeout(
-                    resolveDelay,
-                    750,
-                  ),
-              )
-
-              /*
-               * This is Tauri's native print command.
-               *
-               * It opens the operating system's print dialog,
-               * where the user can select "Save as PDF".
-               */
-              await pdfWindow.print()
-
-              cleanup()
-              resolve()
-            } catch (error) {
-              cleanup()
-              reject(error)
-            }
-          },
-        )
+    printWindow.addEventListener(
+      "afterprint",
+      () => {
+        printWindow.close()
+      },
+      {
+        once: true,
       },
     )
 
@@ -1111,37 +1007,143 @@ export async function exportProjectToPdf(
   }
 
   /*
-   * Browser fallback.
-   *
-   * This is useful when running `npm run dev` in a normal
-   * browser instead of through Tauri.
+   * Tauri version.
    */
-  const printWindow =
-    window.open(
-      "",
-      "_blank",
-      "width=1000,height=800",
-    )
-
-  if (!printWindow) {
-    throw new Error(
-      "The PDF export window was blocked by the browser. Please allow pop-ups for Mnemeona.",
-    )
-  }
-
-  printWindow.document.open()
-  printWindow.document.write(
-    html,
+  const {
+    WebviewWindow,
+  } = await import(
+    "@tauri-apps/api/webviewWindow"
   )
-  printWindow.document.close()
 
-  printWindow.addEventListener(
-    "afterprint",
-    () => {
-      printWindow.close()
-    },
-    {
-      once: true,
+  /*
+   * Tauri window labels only permit:
+   * a-z A-Z 0-9 - / : _
+   */
+  const label =
+    `pdf-export-${Date.now()}`
+
+  /*
+   * Encode the complete HTML document into a data URL.
+   *
+   * This avoids:
+   * - window.open()
+   * - browser popup blocking
+   * - modifying the current application window
+   * - eval() of a giant HTML document
+   */
+  const encodedHtml =
+    encodeURIComponent(html)
+
+  const dataUrl =
+    `data:text/html;charset=utf-8,${encodedHtml}`
+
+  const pdfWindow =
+    new WebviewWindow(
+      label,
+      {
+        title:
+          `${project.title} — PDF Export`,
+
+        url: dataUrl,
+
+        width: 1000,
+        height: 800,
+
+        center: true,
+        resizable: true,
+        decorations: true,
+      },
+    )
+
+  await new Promise<void>(
+    (
+      resolve,
+      reject,
+    ) => {
+      let finished =
+        false
+
+      const fail =
+        (error: unknown) => {
+          if (finished) {
+            return
+          }
+
+          finished = true
+
+          reject(
+            error instanceof Error
+              ? error
+              : new Error(
+                  String(error),
+                ),
+          )
+        }
+
+      const succeed =
+        () => {
+          if (finished) {
+            return
+          }
+
+          finished = true
+          resolve()
+        }
+
+      void pdfWindow.once(
+        "tauri://error",
+        (event) => {
+          console.error(
+            "Tauri PDF window creation error:",
+            event,
+          )
+
+          fail(
+            new Error(
+              "Tauri could not create the PDF preview window.",
+            ),
+          )
+        },
+      )
+
+      void pdfWindow.once(
+        "tauri://created",
+        async () => {
+          try {
+            /*
+             * Wait for the HTML document to finish rendering.
+             *
+             * The data URL is already the document we want,
+             * so there is no need to call eval().
+             */
+            await new Promise<void>(
+              (resolveDelay) => {
+                setTimeout(
+                  resolveDelay,
+                  1000,
+                )
+              },
+            )
+
+            /*
+             * Open the native Tauri print dialog.
+             *
+             * The user can select "Print to File" / "Save as PDF"
+             * from the Linux print dialog.
+             */
+            await pdfWindow.print()
+
+            succeed()
+          } catch (error) {
+            console.error(
+              "Tauri PDF printing failed:",
+              error,
+            )
+
+            fail(error)
+          }
+        },
+      )
     },
   )
 }
