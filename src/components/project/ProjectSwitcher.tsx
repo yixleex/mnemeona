@@ -14,6 +14,7 @@ import {
   Save,
   Trash2,
   Upload,
+  FileText,
 } from "lucide-react"
 
 import {
@@ -58,6 +59,10 @@ import {
   deleteProjectFromDatabase,
   type StoredProjectSummary,
 } from "@/lib/projectDatabase"
+
+import {
+  exportProjectToPdf,
+} from "@/lib/exportProjectPdf"
 
 export function ProjectSwitcher() {
   const {
@@ -177,9 +182,9 @@ export function ProjectSwitcher() {
   // --------------------------------------------------
 
   const handleSaveProject =
-    () => {
+    async () => {
       try {
-        void saveProject()
+        await saveProject()
       } catch (error) {
         console.error(
           "Failed to save project:",
@@ -188,6 +193,32 @@ export function ProjectSwitcher() {
 
         window.alert(
           `Could not export project.\n\n${
+            error instanceof Error
+              ? error.message
+              : "Unknown error"
+          }`,
+        )
+      }
+    }
+
+  // --------------------------------------------------
+  // Export project to PDF
+  // --------------------------------------------------
+
+  const handleExportPdf =
+    () => {
+      try {
+        exportProjectToPdf(
+          project,
+        )
+      } catch (error) {
+        console.error(
+          "Failed to export project to PDF:",
+          error,
+        )
+
+        window.alert(
+          `Could not export project to PDF.\n\n${
             error instanceof Error
               ? error.message
               : "Unknown error"
@@ -454,16 +485,16 @@ export function ProjectSwitcher() {
         <DropdownMenuTrigger
           asChild
         >
-            <Button
-              variant="ghost"
-              className="w-44 min-w-0 gap-2 px-2"
-            >
-              <span className="min-w-0 flex-1 truncate">
-                {project.title}
-              </span>
+          <Button
+            variant="ghost"
+            className="w-44 min-w-0 gap-2 px-2"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {project.title}
+            </span>
 
-              <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-            </Button>
+            <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+          </Button>
         </DropdownMenuTrigger>
 
         <DropdownMenuContent
@@ -504,6 +535,16 @@ export function ProjectSwitcher() {
             <Save className="mr-2 size-4" />
 
             Export Project JSON
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onClick={
+              handleExportPdf
+            }
+          >
+            <FileText className="mr-2 size-4" />
+
+            Export Project to PDF
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />

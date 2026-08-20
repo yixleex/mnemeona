@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "project-pdf",
+  "description": "Allows Mnemeona to create a dedicated project PDF preview window and use the native print dialog.",
+  "windows": [
+    "main",
+    "project-pdf-*"
+  ],
+  "permissions": [
+    "core:webview:allow-create-webview-window",
+    "core:webview:allow-print",
+    "core:window:allow-close"
+  ]
+}
