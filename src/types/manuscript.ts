@@ -1,9 +1,10 @@
 import type { JSONContent } from "@tiptap/core";
 
 export type Manuscript = {
-  id: string;
-  title: string;
-  acts: Act[];
+    id: string;
+    title: string;
+    acts: Act[];
+    draftScenes: Scene[];
 };
 
 export type Act = {

@@ -53,6 +53,19 @@ function normalizeProject(
   return {
     ...project,
 
+    manuscript: {
+      ...project.manuscript,
+
+      /*
+       * Draft Segment was added after the original
+       * project format. Older projects therefore may
+       * not have this property.
+       */
+      draftScenes:
+        project.manuscript.draftScenes ??
+        [],
+    },
+
     characters:
       project.characters ?? [],
 
@@ -66,7 +79,7 @@ function normalizeProject(
       project.factions ?? [],
 
     artifacts:
-        project.artifacts ?? [],
+      project.artifacts ?? [],
 
     notes:
       project.notes ?? [],
@@ -80,12 +93,38 @@ function normalizeProject(
 }
 
 // --------------------------------------------------
+// Draft scene lookup
+// --------------------------------------------------
+
+function findDraftScene(
+  project: MnemeonaProject,
+  sceneId: string | null,
+) {
+  if (!sceneId) {
+    return null
+  }
+
+  return (
+    project.manuscript.draftScenes ??
+    []
+  ).find(
+    (scene) =>
+      scene.id === sceneId,
+  ) ?? null
+}
+
+// --------------------------------------------------
 // Story summary fingerprint
 // --------------------------------------------------
 
 /**
  * Creates a deterministic representation of all scenes
- * BEFORE the currently active scene.
+ * BEFORE the currently active manuscript scene.
+ *
+ * Draft scenes intentionally return an empty fingerprint.
+ *
+ * Draft Segment scenes are independent writing spaces and
+ * must never cause or receive Story So Far generation.
  *
  * The active scene itself is deliberately excluded.
  *
@@ -100,43 +139,100 @@ function buildStorySummaryFingerprint(
     return ""
   }
 
+  /*
+   * If the active scene is a draft scene, it does not
+   * participate in the manuscript story order.
+   *
+   * Therefore it must never have a Story So Far
+   * fingerprint.
+   */
+  const activeDraftScene =
+    findDraftScene(
+      project,
+      activeSceneId,
+    )
+
+  if (activeDraftScene) {
+    return ""
+  }
+
   const parts: string[] = []
 
   let foundActiveScene = false
 
-  for (const act of project.manuscript.acts) {
-    for (const chapter of act.chapters) {
-      for (const scene of chapter.scenes) {
-        if (scene.id === activeSceneId) {
-          foundActiveScene = true
+  for (
+    const act of project.manuscript.acts
+  ) {
+    for (
+      const chapter of act.chapters
+    ) {
+      for (
+        const scene of chapter.scenes
+      ) {
+        if (
+          scene.id ===
+          activeSceneId
+        ) {
+          foundActiveScene =
+            true
+
           break
         }
 
         parts.push(
           JSON.stringify({
             actId: act.id,
-            chapterId: chapter.id,
-            sceneId: scene.id,
+            chapterId:
+              chapter.id,
+            sceneId:
+              scene.id,
 
-            title: scene.title,
-            synopsis: scene.synopsis,
-            pov: scene.pov,
-            location: scene.location,
-            time: scene.time,
+            title:
+              scene.title,
 
-            content: scene.content,
+            synopsis:
+              scene.synopsis,
+
+            pov:
+              scene.pov,
+
+            location:
+              scene.location,
+
+            time:
+              scene.time,
+
+            content:
+              scene.content,
           }),
         )
       }
 
-      if (foundActiveScene) {
+      if (
+        foundActiveScene
+      ) {
         break
       }
     }
 
-    if (foundActiveScene) {
+    if (
+      foundActiveScene
+    ) {
       break
     }
+  }
+
+  /*
+   * If the active ID was not found in the manuscript,
+   * it is not a valid manuscript position.
+   *
+   * This also protects against accidental Story So Far
+   * generation if a stale activeSceneId exists.
+   */
+  if (
+    !foundActiveScene
+  ) {
+    return ""
   }
 
   return parts.join("\n")
@@ -158,8 +254,10 @@ export function ProjectProvider({
       ),
     )
 
-  const [summaryGenerating, setSummaryGenerating] =
-    useState(false)
+  const [
+    summaryGenerating,
+    setSummaryGenerating,
+  ] = useState(false)
 
   const [
     databaseHydrated,
@@ -167,9 +265,12 @@ export function ProjectProvider({
   ] = useState(false)
 
   const databaseSaveTimer =
-    useRef<ReturnType<
-      typeof setTimeout
-    > | null>(null)
+    useRef<
+      ReturnType<
+        typeof setTimeout
+      > | null
+    >(null)
+
   /**
    * Prevents the initial project mount from invoking
    * the AI summary service.
@@ -194,35 +295,85 @@ export function ProjectProvider({
   const activeSceneId =
     project.settings.activeSceneId
 
-  const activeScene =
+  /*
+   * First look for a normal manuscript scene.
+   */
+  const manuscriptActiveScene =
     findScene(
       project.manuscript.acts,
       activeSceneId,
     )
 
+  /*
+   * If it wasn't found there, look in Draft Segment.
+   */
+  const draftActiveScene =
+    findDraftScene(
+      project,
+      activeSceneId,
+    )
+
+  /*
+   * The editor can therefore operate on either type
+   * of scene without needing a separate editor.
+   */
+  const activeScene =
+    manuscriptActiveScene ??
+    draftActiveScene
+
+  /*
+   * Explicitly expose whether the current scene is
+   * an independent Draft Segment scene.
+   */
+  const activeSceneIsDraft =
+    draftActiveScene !==
+      null &&
+    manuscriptActiveScene ===
+      null
+
   // --------------------------------------------------
   // Word counts
   // --------------------------------------------------
 
-  const activeSceneWordCount =
-    calculateSceneWordCount(
-      activeScene,
-    )
-
+  /*
+   * Project word count deliberately only counts
+   * manuscript scenes.
+   *
+   * Draft Segment scenes are not part of the manuscript
+   * and therefore should not inflate the manuscript count.
+   */
   const projectWordCount =
     calculateProjectWordCount(
       project.manuscript.acts,
+    )
+
+  /*
+   * Active scene count still works for both normal
+   * manuscript scenes and draft scenes.
+   */
+  const activeSceneWordCount =
+    calculateSceneWordCount(
+      activeScene,
     )
 
   // --------------------------------------------------
   // Current story-summary fingerprint
   // --------------------------------------------------
 
+  /*
+   * Draft scenes produce an empty fingerprint here.
+   *
+   * This is the main protection preventing Draft Segment
+   * scenes from triggering Story So Far generation.
+   */
   const storySummaryFingerprint =
-    buildStorySummaryFingerprint(
-      project,
-      activeSceneId,
-    )
+    activeSceneIsDraft
+      ? ""
+      : buildStorySummaryFingerprint(
+          project,
+          activeSceneId,
+        )
+
   // --------------------------------------------------
   // IndexedDB project persistence
   // --------------------------------------------------
@@ -351,6 +502,7 @@ export function ProjectProvider({
     project,
     databaseHydrated,
   ])
+
   // --------------------------------------------------
   // Story summary generation
   // --------------------------------------------------
@@ -361,18 +513,23 @@ export function ProjectProvider({
     let message =
       "Unknown error"
 
-    if (error instanceof Error) {
+    if (
+      error instanceof Error
+    ) {
       message =
         error.message ||
         "Unknown error"
     } else if (
-      typeof error === "string"
+      typeof error ===
+      "string"
     ) {
       message = error
     } else {
       try {
         message =
-          JSON.stringify(error)
+          JSON.stringify(
+            error,
+          )
       } catch {
         message =
           "Unknown error"
@@ -400,16 +557,33 @@ export function ProjectProvider({
           )
 
         const sceneId =
-          normalizedProject.settings
+          normalizedProject
+            .settings
             .activeSceneId
 
         if (!sceneId) {
           return
         }
 
+        /*
+         * Never generate Story So Far for a Draft Segment
+         * scene.
+         */
+        const draftScene =
+          findDraftScene(
+            normalizedProject,
+            sceneId,
+          )
+
+        if (draftScene) {
+          return
+        }
+
         const targetScene =
           findScene(
-            normalizedProject.manuscript.acts,
+            normalizedProject
+              .manuscript
+              .acts,
             sceneId,
           )
 
@@ -427,7 +601,9 @@ export function ProjectProvider({
          * There is no previous story before the first
          * scene, so there is nothing to summarize.
          */
-        if (!fingerprint.trim()) {
+        if (
+          !fingerprint.trim()
+        ) {
           return
         }
 
@@ -436,8 +612,11 @@ export function ProjectProvider({
          * exact story state before this scene.
          */
         if (
-          normalizedProject.storySummary?.trim() &&
-          normalizedProject.storySummaryFingerprint ===
+          normalizedProject
+            .storySummary
+            ?.trim() &&
+          normalizedProject
+            .storySummaryFingerprint ===
             fingerprint
         ) {
           return
@@ -447,7 +626,8 @@ export function ProjectProvider({
          * Don't allow overlapping AI requests.
          */
         if (
-          summaryRequestInProgress.current
+          summaryRequestInProgress
+            .current
         ) {
           return
         }
@@ -455,7 +635,9 @@ export function ProjectProvider({
         summaryRequestInProgress.current =
           true
 
-        setSummaryGenerating(true)
+        setSummaryGenerating(
+          true,
+        )
 
         try {
           const summary =
@@ -464,7 +646,9 @@ export function ProjectProvider({
               targetScene,
             )
 
-          if (!summary?.trim()) {
+          if (
+            !summary?.trim()
+          ) {
             return
           }
 
@@ -487,9 +671,27 @@ export function ProjectProvider({
                 current.settings
                   .activeSceneId
 
+              /*
+               * Do not attach a summary if the user
+               * changed scenes while generation was
+               * happening.
+               */
               if (
                 currentSceneId !==
                 sceneId
+              ) {
+                return current
+              }
+
+              /*
+               * Also make absolutely sure the scene
+               * didn't become a Draft Segment scene.
+               */
+              if (
+                findDraftScene(
+                  current,
+                  currentSceneId,
+                )
               ) {
                 return current
               }
@@ -530,7 +732,10 @@ export function ProjectProvider({
            * AI/Ollama failures must never crash the
            * application.
            */
-          showStorySummaryError(error)
+          showStorySummaryError(
+            error,
+          )
+
           console.error(
             "Failed to generate story summary:",
             error,
@@ -539,7 +744,9 @@ export function ProjectProvider({
           summaryRequestInProgress.current =
             false
 
-          setSummaryGenerating(false)
+          setSummaryGenerating(
+            false,
+          )
         }
       },
       [],
@@ -556,7 +763,9 @@ export function ProjectProvider({
      *
      * This is the startup-crash protection.
      */
-    if (!hasMounted.current) {
+    if (
+      !hasMounted.current
+    ) {
       hasMounted.current =
         true
 
@@ -567,10 +776,22 @@ export function ProjectProvider({
       return
     }
 
+    /*
+     * Draft Segment scenes must never trigger the
+     * Story So Far system.
+     */
+    if (
+      activeSceneIsDraft
+    ) {
+      return
+    }
+
     /**
      * First scene has no previous story.
      */
-    if (!storySummaryFingerprint.trim()) {
+    if (
+      !storySummaryFingerprint.trim()
+    ) {
       return
     }
 
@@ -579,7 +800,8 @@ export function ProjectProvider({
      */
     if (
       project.storySummary?.trim() &&
-      project.storySummaryFingerprint ===
+      project
+        .storySummaryFingerprint ===
         storySummaryFingerprint
     ) {
       return
@@ -589,7 +811,8 @@ export function ProjectProvider({
      * An existing request is already processing.
      */
     if (
-      summaryRequestInProgress.current
+      summaryRequestInProgress
+        .current
     ) {
       return
     }
@@ -599,6 +822,7 @@ export function ProjectProvider({
     )
   }, [
     activeSceneId,
+    activeSceneIsDraft,
     storySummaryFingerprint,
     project.storySummary,
     project.storySummaryFingerprint,
@@ -613,7 +837,8 @@ export function ProjectProvider({
   const createNewProject =
     useCallback(
       (
-        title = "Untitled Novel",
+        title =
+          "Untitled Novel",
       ) => {
         projectActions.createNewProject(
           setProject,
@@ -1097,6 +1322,7 @@ export function ProjectProvider({
 
         activeSceneId,
         activeScene,
+        activeSceneIsDraft,
 
         projectWordCount,
         activeSceneWordCount,
@@ -1152,6 +1378,7 @@ export function ProjectProvider({
 
         activeSceneId,
         activeScene,
+        activeSceneIsDraft,
 
         projectWordCount,
         activeSceneWordCount,

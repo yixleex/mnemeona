@@ -359,6 +359,7 @@ export function buildAIContext(
       project.events,
       project.factions ?? [],
       project.artifacts ?? [],
+      project.lore ?? [],
     )
 
   const formattedContext =
@@ -366,9 +367,15 @@ export function buildAIContext(
       context,
     ).text
 
-  const storySummary =
-    project.storySummary?.trim() ||
-    "No story summary has been generated yet."
+  const isDraftScene =
+    (
+      project.manuscript
+        .draftScenes ?? []
+    ).some(
+      (scene) =>
+        scene.id ===
+        activeScene.id,
+    )
 
   const sections: string[] =
     []
@@ -381,13 +388,26 @@ export function buildAIContext(
     )
   }
 
-  sections.push(
-    [
-      "## Story So Far",
-      "",
-      storySummary,
-    ].join("\n"),
-  )
+  /*
+   * Draft scenes deliberately do NOT receive
+   * the persistent Story So Far summary.
+   *
+   * They are independent writing spaces and should
+   * only use the current scene plus database context.
+   */
+  if (!isDraftScene) {
+    const storySummary =
+      project.storySummary?.trim() ||
+      "No story summary has been generated yet."
+
+    sections.push(
+      [
+        "## Story So Far",
+        "",
+        storySummary,
+      ].join("\n"),
+    )
+  }
 
   sections.push(
     [

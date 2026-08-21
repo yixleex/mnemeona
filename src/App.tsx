@@ -44,6 +44,8 @@ import { NotesPanel } from "./components/notes/NotesPanel"
 
 import { useProject } from "./context/ProjectContext"
 
+import { DraftSegment } from "./components/manuscript/DraftSegment"
+
 import {
   loadContinueWritingLength,
 } from "./components/ai/aiservice/aiService"
@@ -259,6 +261,7 @@ export default function App() {
             }
           />
 
+          <DraftSegment />
           {/* Story */}
 
           <div className="mb-2 mt-8 px-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">

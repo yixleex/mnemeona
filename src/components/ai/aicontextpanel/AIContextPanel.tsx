@@ -37,6 +37,7 @@ import { useAITokenCount } from "@/components/ai/aiservice/useAITokenCount"
 
 interface AIContextPanelProps {
   onClose?: () => void
+
   onTokenCalculationChange?: (
     isCalculating: boolean,
   ) => void
@@ -157,6 +158,7 @@ export function AIContextPanel({
   const {
     project,
     activeScene,
+    activeSceneIsDraft,
     updateProject,
   } = useProject()
 
@@ -175,7 +177,8 @@ export function AIContextPanel({
   )
 
   const sceneAIContext =
-    activeScene?.aiAdditionalContext ?? ""
+    activeScene?.aiAdditionalContext ??
+    ""
 
   useEffect(() => {
     setContinueWritingLength(
@@ -283,40 +286,57 @@ export function AIContextPanel({
   const storySummary =
     storySummaryDraft.trim()
 
-  const contextSections: string[] = []
+  /*
+   * Draft Segment scenes intentionally do not receive
+   * Story So Far.
+   *
+   * Normal manuscript scenes continue to receive it.
+   */
+  const contextSections: string[] =
+    []
 
-  if (
-    storySummary
-  ) {
-    contextSections.push(
-      [
-        "## Story So Far",
-        "",
-        storySummary,
-      ].join("\n"),
-    )
-  } else {
-    contextSections.push(
-      [
-        "## Story So Far",
-        "",
-        "No story summary has been generated yet.",
-      ].join("\n"),
-    )
+  if (!activeSceneIsDraft) {
+    if (storySummary) {
+      contextSections.push(
+        [
+          "## Story So Far",
+          "",
+          storySummary,
+        ].join("\n"),
+      )
+    } else {
+      contextSections.push(
+        [
+          "## Story So Far",
+          "",
+          "No story summary has been generated yet.",
+        ].join("\n"),
+      )
+    }
   }
 
-  contextSections.push(
-    [
-      "## Current Story Context",
-      "",
-      formatted.text,
-    ].join("\n"),
-  )
-
-  const formattedText =
-    contextSections.join(
-      "\n\n",
+  /*
+   * The actual formatted AI context consists of:
+   *
+   * Normal manuscript scene:
+   *   Story So Far
+   *   +
+   *   Database context
+   *
+   * Draft scene:
+   *   Database context only
+   *
+   * The current scene prose is added separately below.
+   */
+  const formattedText = [
+    ...contextSections,
+    formatted.text,
+  ]
+    .filter(
+      (section) =>
+        section.trim(),
     )
+    .join("\n\n")
 
   // --------------------------------------------------
   // Scene Text
@@ -383,11 +403,22 @@ export function AIContextPanel({
         value,
       )
 
+      /*
+       * This handler is only rendered for normal
+       * manuscript scenes. Draft scenes never expose
+       * Story So Far in this panel.
+       */
+      if (activeSceneIsDraft) {
+        return
+      }
+
       updateProject(
         (currentProject) => ({
           ...currentProject,
+
           storySummary:
             value,
+
           updatedAt:
             new Date().toISOString(),
         }),
@@ -405,31 +436,62 @@ export function AIContextPanel({
           manuscript: {
             ...currentProject.manuscript,
 
+            /*
+             * Normal manuscript scenes.
+             */
             acts:
-              currentProject.manuscript.acts.map(
-                (act) => ({
-                  ...act,
+              currentProject
+                .manuscript
+                .acts.map(
+                  (act) => ({
+                    ...act,
 
-                  chapters:
-                    act.chapters.map(
-                      (chapter) => ({
-                        ...chapter,
+                    chapters:
+                      act.chapters.map(
+                        (chapter) => ({
+                          ...chapter,
 
-                        scenes:
-                          chapter.scenes.map(
-                            (scene) =>
-                              scene.id ===
-                              activeScene.id
-                                ? {
-                                    ...scene,
-                                    aiAdditionalContext:
-                                      value,
-                                  }
-                                : scene,
-                          ),
-                      }),
-                    ),
-                }),
+                          scenes:
+                            chapter.scenes.map(
+                              (scene) =>
+                                scene.id ===
+                                activeScene.id
+                                  ? {
+                                      ...scene,
+
+                                      aiAdditionalContext:
+                                        value,
+                                    }
+                                  : scene,
+                            ),
+                        }),
+                      ),
+                  }),
+                ),
+
+            /*
+             * Draft Segment scenes.
+             *
+             * This is intentionally handled separately
+             * because draft scenes do not live inside
+             * acts/chapters.
+             */
+            draftScenes:
+              (
+                currentProject
+                  .manuscript
+                  .draftScenes ?? []
+              ).map(
+                (scene) =>
+                  scene.id ===
+                  activeScene.id
+                    ? {
+                        ...scene,
+
+                        aiAdditionalContext:
+                          value,
+                      }
+                    : scene,
               ),
           },
 
@@ -444,6 +506,10 @@ export function AIContextPanel({
       calculateTokenCount()
     }
 
+  // --------------------------------------------------
+  // Render
+  // --------------------------------------------------
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
 
@@ -455,19 +521,35 @@ export function AIContextPanel({
         <div className="flex items-start justify-between gap-4">
 
           <div className="flex items-start gap-3">
+
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
               <Sparkles className="h-5 w-5 text-primary" />
             </div>
 
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">
-                AI Context
-              </h1>
+
+              <div className="flex items-center gap-2">
+
+                <h1 className="text-xl font-semibold tracking-tight">
+                  AI Context
+                </h1>
+
+                {activeSceneIsDraft && (
+                  <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+                    Draft
+                  </span>
+                )}
+
+              </div>
 
               <p className="mt-1 text-sm text-muted-foreground">
-                Everything currently available to the AI for this scene.
+                {activeSceneIsDraft
+                  ? "Context available to the AI for this independent draft scene."
+                  : "Everything currently available to the AI for this scene."}
               </p>
+
             </div>
+
           </div>
 
           {onClose && (
@@ -492,10 +574,51 @@ export function AIContextPanel({
         <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
 
           {/* ================================================== */}
+          {/* Draft Information */}
+          {/* ================================================== */}
+
+          {activeSceneIsDraft && (
+            <section>
+
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+
+                <div className="flex items-start gap-3">
+
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+
+                    <Sparkles className="h-4 w-4 text-primary" />
+
+                  </div>
+
+                  <div>
+
+                    <h2 className="text-sm font-semibold">
+                      Independent Draft Scene
+                    </h2>
+
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      This scene is independent from the manuscript
+                      order. The AI can use your Characters, Locations,
+                      World Events, Factions, Artifacts, World Lore,
+                      scene information, and scene-specific instructions.
+                      Story So Far is intentionally excluded.
+                    </p>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </section>
+          )}
+
+          {/* ================================================== */}
           {/* Continue AI Settings */}
           {/* ================================================== */}
 
           <section>
+
             <div className="rounded-xl border bg-card p-5">
 
               <div className="mb-5">
@@ -573,51 +696,54 @@ export function AIContextPanel({
               </div>
 
             </div>
+
           </section>
 
           {/* ================================================== */}
           {/* Story So Far */}
           {/* ================================================== */}
 
-          <section>
+          {!activeSceneIsDraft && (
+            <section>
 
-            <div className="mb-4">
+              <div className="mb-4">
 
-              <h2 className="text-sm font-semibold">
-                Story So Far
-              </h2>
+                <h2 className="text-sm font-semibold">
+                  Story So Far
+                </h2>
 
-              <p className="text-sm text-muted-foreground">
-                The persistent summary of what has actually happened
-                in the story. You can edit it to correct or clarify
-                anything the AI got wrong or missed.
-              </p>
+                <p className="text-sm text-muted-foreground">
+                  The persistent summary of what has actually happened
+                  in the story. You can edit it to correct or clarify
+                  anything the AI got wrong or missed.
+                </p>
 
-            </div>
+              </div>
 
-            <div className="rounded-xl border bg-card p-5">
+              <div className="rounded-xl border bg-card p-5">
 
-              <Textarea
-                id="story-summary"
-                value={storySummaryDraft}
-                onChange={(event) =>
-                  handleStorySummaryChange(
-                    event.target.value,
-                  )
-                }
-                placeholder="The story summary will appear here once it has been generated. You can also write or correct it yourself..."
-                className="min-h-[180px] resize-y leading-relaxed"
-                aria-label="Story So Far"
-              />
+                <Textarea
+                  id="story-summary"
+                  value={storySummaryDraft}
+                  onChange={(event) =>
+                    handleStorySummaryChange(
+                      event.target.value,
+                    )
+                  }
+                  placeholder="The story summary will appear here once it has been generated. You can also write or correct it yourself..."
+                  className="min-h-[180px] resize-y leading-relaxed"
+                  aria-label="Story So Far"
+                />
 
-              <p className="mt-2 text-xs text-muted-foreground">
-                Changes are saved automatically and will be used by the
-                AI as the persistent story summary.
-              </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Changes are saved automatically and will be used by
+                  the AI as the persistent story summary.
+                </p>
 
-            </div>
+              </div>
 
-          </section>
+            </section>
+          )}
 
           {/* ================================================== */}
           {/* Scene-specific context */}
@@ -956,11 +1082,16 @@ export function AIContextPanel({
                     </div>
 
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Includes Story So Far, current story context,
-                      characters, locations, world events, factions,
-                      artifacts, world lore, and the actual scene text.
-                      Persistent notes are still included in the AI prompt
-                      but are managed separately in the Notes workspace.
+
+                      {activeSceneIsDraft
+                        ? "Includes the current story context, characters, locations, world events, factions, artifacts, world lore, scene-specific instructions, and the actual draft scene text. Story So Far is intentionally excluded."
+                        : "Includes Story So Far, current story context, characters, locations, world events, factions, artifacts, world lore, scene-specific instructions, and the actual scene text."}
+
+                      {" "}
+                      Persistent notes are still included in the AI
+                      prompt but are managed separately in the Notes
+                      workspace.
+
                     </p>
 
                   </div>
@@ -1079,7 +1210,6 @@ export function AIContextPanel({
                 }
               />
 
-              {/* NEW: World Lore */}
               <ContextStat
                 icon={ScrollText}
                 label="World Lore"
@@ -1124,9 +1254,19 @@ export function AIContextPanel({
 
             <div className="rounded-xl border bg-card p-5">
 
-              <h3 className="font-medium">
-                {activeScene.title}
-              </h3>
+              <div className="flex items-start justify-between gap-4">
+
+                <h3 className="font-medium">
+                  {activeScene.title}
+                </h3>
+
+                {activeSceneIsDraft && (
+                  <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+                    Draft Segment
+                  </span>
+                )}
+
+              </div>
 
               {activeScene.synopsis?.trim() && (
 
@@ -1223,15 +1363,19 @@ export function AIContextPanel({
                 </h2>
 
                 <p className="text-sm text-muted-foreground">
-                  Story So Far, current story context, detected world
-                  information, artifacts, world lore, and scene prose
-                  available to the AI. Persistent notes remain managed
-                  separately.
+
+                  {activeSceneIsDraft
+                    ? "Current story context, detected world information, artifacts, world lore, scene instructions, and scene prose. Story So Far is intentionally excluded from Draft Segment scenes."
+                    : "Story So Far, current story context, detected world information, artifacts, world lore, scene instructions, and scene prose available to the AI."}
+
+                  {" "}
+                  Persistent notes remain managed separately.
+
                 </p>
 
               </div>
 
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
 
                 <Eye className="h-4 w-4" />
 
@@ -1244,6 +1388,7 @@ export function AIContextPanel({
             </div>
 
             <pre className="max-h-[700px] overflow-auto whitespace-pre-wrap rounded-xl border bg-muted/30 p-5 font-mono text-xs leading-relaxed">
+
               {formattedText}
 
               {sceneText && (
@@ -1253,6 +1398,7 @@ export function AIContextPanel({
                   {sceneText}
                 </>
               )}
+
             </pre>
 
           </section>

@@ -30,6 +30,7 @@ function createEmptyScene(
     location: "",
     time: "",
     characterIds: [],
+    aiAdditionalContext: "",
   }
 }
 
@@ -79,6 +80,16 @@ export function createManuscript(
         "Act I",
       ),
     ],
+
+    /*
+     * Draft Segment
+     *
+     * These scenes are completely independent from
+     * the manuscript's act/chapter structure.
+     *
+     * They do not have a particular story order.
+     */
+    draftScenes: [],
   }
 }
 
@@ -115,6 +126,7 @@ export function createProject(
     notes: [],
 
     storySummary: "",
+
     storySummaryFingerprint:
       "",
 
@@ -185,6 +197,10 @@ export function downloadProject(
  * Older project files are automatically migrated
  * by providing missing world collections as empty arrays.
  *
+ * Draft Segment was added after the original project format,
+ * so older projects are also automatically given an empty
+ * draftScenes collection.
+ *
  * The imported project is also placed into IndexedDB and
  * becomes the active local project.
  */
@@ -222,9 +238,27 @@ export async function openProject(): Promise<
                 text,
               ) as Partial<MnemeonaProject>
 
+            /*
+             * Migrate older projects.
+             *
+             * The manuscript itself may be missing
+             * draftScenes because Draft Segment did not
+             * exist in older project files.
+             */
+            const parsedManuscript =
+              parsed.manuscript
+
             const project: MnemeonaProject =
               {
                 ...parsed,
+
+                manuscript: {
+                  ...parsedManuscript,
+
+                  draftScenes:
+                    parsedManuscript?.draftScenes ??
+                    [],
+                },
 
                 storySummary:
                   parsed.storySummary ??

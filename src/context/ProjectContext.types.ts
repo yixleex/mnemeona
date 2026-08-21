@@ -9,8 +9,9 @@ import type { WorldEvent } from "@/types/world/event"
 export interface ProjectContextValue {
   project: MnemeonaProject
 
-  activeSceneId: string | null
-  activeScene: Scene | null
+    activeSceneId: string | null
+    activeScene: Scene | null
+    activeSceneIsDraft: boolean
 
   projectWordCount: number
   activeSceneWordCount: number

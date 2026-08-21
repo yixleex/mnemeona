@@ -774,6 +774,21 @@ export function updateSceneContent(
               ),
           }),
         ),
+
+      draftScenes:
+        (
+          current.manuscript
+            .draftScenes ?? []
+        ).map(
+          (scene) =>
+            scene.id ===
+            sceneId
+              ? {
+                  ...scene,
+                  content,
+                }
+              : scene,
+        ),
     },
 
     updatedAt:
