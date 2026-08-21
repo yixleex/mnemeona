@@ -24,6 +24,7 @@ import { useProject } from "@/context/ProjectContext"
 
 import { EditorToolbar } from "./EditorToolbar"
 import { AITextMark } from "./AITextMark"
+import { AIDirector } from "./AIDirector"
 
 import {
   loadContinueWritingLength,
@@ -46,14 +47,23 @@ export function NovelEditor() {
 
   /*
    * The AbortController belongs to the current
-   * Continue Writing generation.
+   * AI generation.
    *
-   * This allows the Stop AI button to cancel the
-   * actual network stream rather than merely changing
-   * the UI state.
+   * It is shared by Continue AI and AI Director so
+   * both can be stopped using the same cancellation
+   * mechanism.
    */
   const continueAbortController =
     useRef<AbortController | null>(null)
+
+  /*
+   * Identifies an active AI Director request.
+   *
+   * Continue AI does not need a request ID because
+   * it is controlled directly by the existing UI.
+   */
+  const directorRequestId =
+    useRef<string | null>(null)
 
   const editor =
     useEditor({
@@ -118,6 +128,8 @@ export function NovelEditor() {
     continueAbortController.current?.abort()
     continueAbortController.current = null
 
+    directorRequestId.current = null
+
     setAIGenerating(false)
 
     if (!activeScene) {
@@ -148,6 +160,7 @@ export function NovelEditor() {
     return () => {
       continueAbortController.current?.abort()
       continueAbortController.current = null
+      directorRequestId.current = null
     }
   }, [])
 
@@ -171,8 +184,8 @@ export function NovelEditor() {
        * Never save normal editor updates while AI
        * generation is controlling the document.
        *
-       * Continue Writing explicitly saves its
-       * completed or partially generated document.
+       * Continue AI and AI Director explicitly save
+       * their generated document.
        */
       if (aiGenerating) {
         return
@@ -203,7 +216,7 @@ export function NovelEditor() {
   ])
 
   // --------------------------------------------------
-  // Stop AI Continue Writing
+  // Stop AI generation
   // --------------------------------------------------
 
   const stopAIContinue = () => {
@@ -244,6 +257,9 @@ export function NovelEditor() {
 
         continueAbortController.current =
           controller
+
+        directorRequestId.current =
+          null
 
         setAIGenerating(
           true,
@@ -501,6 +517,396 @@ ${sceneAIContext}`
     updateSceneContent,
   ])
 
+  // --------------------------------------------------
+  // AI Director
+  // --------------------------------------------------
+
+  useEffect(() => {
+    if (!editor) {
+      return
+    }
+
+    const handleDirectorRequest =
+      async (
+        event: Event,
+      ) => {
+        const customEvent =
+          event as CustomEvent<{
+            requestId: string
+            instruction: string
+          }>
+
+        const {
+          requestId,
+          instruction,
+        } =
+          customEvent.detail ?? {}
+
+        if (
+          !requestId ||
+          !instruction?.trim() ||
+          !activeScene ||
+          aiGenerating
+        ) {
+          return
+        }
+
+        /*
+         * Create a dedicated controller for the
+         * AI Director generation.
+         */
+        const controller =
+          new AbortController()
+
+        continueAbortController.current =
+          controller
+
+        directorRequestId.current =
+          requestId
+
+        setAIGenerating(
+          true,
+        )
+
+        /*
+         * The Director always starts at the actual
+         * end of the current manuscript.
+         */
+        const documentEnd =
+          editor.state.doc.content.size
+
+        /*
+         * Read the current scene text so the AI can
+         * understand exactly where it needs to continue.
+         */
+        const existingText =
+          editor.state.doc.textBetween(
+            0,
+            documentEnd,
+            "\n",
+          )
+
+        /*
+         * Read scene-specific AI instructions.
+         */
+        const sceneAIContext =
+          activeScene.aiAdditionalContext
+            ?.trim() ?? ""
+
+        /*
+         * Use the same Continue Writing length setting
+         * for the Director.
+         */
+        const continueWritingTokens =
+          loadContinueWritingLength()
+
+        const directorPrompt =
+          `Continue writing the current scene from the EXACT END of the author's existing text.
+
+The author is directing what should happen next.
+
+AUTHOR'S DIRECTION:
+
+${instruction.trim()}
+
+CURRENT SCENE:
+
+${existingText}
+
+IMPORTANT RULES:
+- Continue directly from the final word of the existing scene.
+- Write ONLY the new continuation prose.
+- Do not repeat any existing text.
+- Do not rewrite the existing scene.
+- Do not restart the scene.
+- Follow the author's direction above.
+- Maintain the established characters, POV, tense, setting, tone, style, pacing, and continuity.
+- Treat the author's direction as instructions about what should happen in the continuation.
+- Make the requested direction feel natural rather than forcing it awkwardly into the prose.
+- Do not explain your choices.
+- Do not mention that you are an AI.
+- Do not summarize what happens.
+- Do not output notes, commentary, headings, or analysis.
+- Output only manuscript prose.
+- If the author's direction is ambiguous, make the most natural interpretation that fits the established story.
+- Do not contradict established story facts.
+- The requested response length is ${continueWritingTokens} tokens.
+- Use the available response length to produce a substantial continuation.
+- Do not intentionally make the response short.${
+            sceneAIContext
+              ? `
+
+ADDITIONAL SCENE-SPECIFIC AUTHOR INSTRUCTIONS:
+
+${sceneAIContext}`
+              : ""
+          }`
+
+        let insertionPosition =
+          documentEnd
+
+        let generatedText =
+          ""
+
+        try {
+          /*
+           * Put the insertion point at the TRUE end
+           * of the manuscript.
+           */
+          editor
+            .chain()
+            .focus()
+            .setTextSelection(
+              insertionPosition,
+            )
+            .setMark("aiText")
+            .run()
+
+          await streamAIChat({
+            messages: [
+              {
+                role: "user",
+                content:
+                  directorPrompt,
+              },
+            ],
+
+            project,
+            activeScene,
+            continueWritingTokens,
+
+            signal:
+              controller.signal,
+
+            onToken: (
+              token,
+            ) => {
+              /*
+               * Ignore anything arriving after Stop.
+               */
+              if (
+                controller.signal.aborted ||
+                !token
+              ) {
+                return
+              }
+
+              /*
+               * Keep a copy for the Director chat
+               * response.
+               */
+              generatedText +=
+                token
+
+              /*
+               * Insert the generated token exactly
+               * where the previous token ended.
+               */
+              const result =
+                editor
+                  .chain()
+                  .focus()
+                  .setTextSelection(
+                    insertionPosition,
+                  )
+                  .setMark("aiText")
+                  .insertContent(
+                    token,
+                  )
+                  .run()
+
+              if (!result) {
+                return
+              }
+
+              /*
+               * Move the insertion point forward after
+               * every streamed token.
+               */
+              insertionPosition =
+                editor.state.selection.from
+            },
+          })
+
+          /*
+           * Remove the AI visual mark after successful
+           * generation.
+           */
+          editor
+            .chain()
+            .focus()
+            .setTextSelection(
+              Math.min(
+                insertionPosition,
+                editor.state.doc.content.size,
+              ),
+            )
+            .unsetMark("aiText")
+            .run()
+
+          /*
+           * Save the newly generated manuscript.
+           */
+          updateSceneContent(
+            activeScene.id,
+            editor.getJSON(),
+          )
+
+          /*
+           * Tell the AI Director UI that generation
+           * finished successfully.
+           */
+          window.dispatchEvent(
+            new CustomEvent(
+              "mnemeona:ai-director-result",
+              {
+                detail: {
+                  requestId,
+                  text:
+                    generatedText,
+                },
+              },
+            ),
+          )
+        } catch (error) {
+          /*
+           * Aborting is expected when the user presses
+           * Stop AI.
+           */
+          const wasAborted =
+            controller.signal.aborted ||
+            (
+              error instanceof DOMException &&
+              error.name ===
+                "AbortError"
+            )
+
+          if (!wasAborted) {
+            console.error(
+              "AI Director generation failed:",
+              error,
+            )
+          }
+
+          /*
+           * Always remove the AI mark.
+           */
+          editor
+            .chain()
+            .focus()
+            .setTextSelection(
+              Math.min(
+                insertionPosition,
+                editor.state.doc.content.size,
+              ),
+            )
+            .unsetMark("aiText")
+            .run()
+
+          /*
+           * Preserve any prose that was successfully
+           * generated before the error/cancellation.
+           */
+          updateSceneContent(
+            activeScene.id,
+            editor.getJSON(),
+          )
+
+          /*
+           * Send the result back to the Director UI.
+           */
+          window.dispatchEvent(
+            new CustomEvent(
+              "mnemeona:ai-director-result",
+              {
+                detail: {
+                  requestId,
+                  text:
+                    generatedText,
+                  error:
+                    wasAborted
+                      ? undefined
+                      : (
+                          error instanceof Error &&
+                          error.message
+                        )
+                        ? error.message
+                        : "AI generation failed.",
+                  aborted:
+                    wasAborted,
+                },
+              },
+            ),
+          )
+        } finally {
+          /*
+           * Only clear the controller if this is still
+           * the generation that owns it.
+           */
+          if (
+            continueAbortController.current ===
+            controller
+          ) {
+            continueAbortController.current =
+              null
+          }
+
+          if (
+            directorRequestId.current ===
+            requestId
+          ) {
+            directorRequestId.current =
+              null
+          }
+
+          setAIGenerating(
+            false,
+          )
+        }
+      }
+
+    const handleDirectorStop =
+      () => {
+        /*
+         * Only stop when an actual Director request
+         * is active.
+         */
+        if (
+          directorRequestId.current
+        ) {
+          continueAbortController.current?.abort()
+        }
+      }
+
+    window.addEventListener(
+      "mnemeona:ai-director",
+      handleDirectorRequest,
+    )
+
+    window.addEventListener(
+      "mnemeona:ai-director-stop",
+      handleDirectorStop,
+    )
+
+    return () => {
+      window.removeEventListener(
+        "mnemeona:ai-director",
+        handleDirectorRequest,
+      )
+
+      window.removeEventListener(
+        "mnemeona:ai-director-stop",
+        handleDirectorStop,
+      )
+    }
+  }, [
+    editor,
+    activeScene,
+    project,
+    aiGenerating,
+    updateSceneContent,
+  ])
+
   if (!editor) {
     return null
   }
@@ -579,6 +985,12 @@ ${sceneAIContext}`
           />
         </div>
       </div>
+
+      {/* -------------------------------------------------- */}
+      {/* AI Director */}
+      {/* -------------------------------------------------- */}
+
+      <AIDirector />
 
     </div>
   )

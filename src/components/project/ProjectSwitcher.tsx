@@ -206,9 +206,19 @@ export function ProjectSwitcher() {
   // --------------------------------------------------
 
   const handleExportPdf =
-    () => {
+    async () => {
       try {
-        exportProjectToPdf(
+        /*
+         * IMPORTANT:
+         *
+         * Await the exporter so errors from Tauri are caught
+         * by this try/catch.
+         *
+         * The exporter itself does not print until this handler
+         * has been triggered by the Export Project to PDF menu
+         * item.
+         */
+        await exportProjectToPdf(
           project,
         )
       } catch (error) {
@@ -538,9 +548,9 @@ export function ProjectSwitcher() {
           </DropdownMenuItem>
 
           <DropdownMenuItem
-            onClick={
-              handleExportPdf
-            }
+            onClick={() => {
+              void handleExportPdf()
+            }}
           >
             <FileText className="mr-2 size-4" />
 
